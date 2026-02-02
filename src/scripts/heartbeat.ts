@@ -1,5 +1,5 @@
-import { config, requireEnv } from "../lib/config.js";
-import { buildAgentToken } from "../lib/agentAuth.js";
+import { config, requireEnv } from "../lib/core/config.js";
+import { buildAgentToken } from "../lib/auth/agentAuth.js";
 
 const userId = process.env.USER_ID || "";
 const agentRole = process.env.AGENT_ROLE || "jarvis";

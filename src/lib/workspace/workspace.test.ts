@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { WorkspaceLoader, resetWorkspaceLoader } from "./workspace.js";
-import { resetSkillsLoader } from "./skills.js";
+import { resetSkillsLoader } from "../skills/skills.js";
 
 const TEST_WORKSPACE = "./test-workspace-unit";
 

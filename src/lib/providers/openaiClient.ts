@@ -5,9 +5,9 @@
  * @deprecated Import from llmProvider.ts for new code.
  */
 
-import { config } from "./config.js";
-import { getWorkspaceLoader, type PromptMode } from "./workspace.js";
-import { getUsageTracker, type CostBreakdown } from "./costs.js";
+import { config } from "../core/config.js";
+import { getWorkspaceLoader, type PromptMode } from "../workspace/workspace.js";
+import { getUsageTracker, type CostBreakdown } from "../integrations/costs.js";
 import {
   llmComplete,
   llmCompact,

@@ -8,7 +8,7 @@ import {
   complete,
   stream
 } from "@mariozechner/pi-ai";
-import { config } from "./config.js";
+import { config } from "../core/config.js";
 
 /**
  * Supported LLM providers.

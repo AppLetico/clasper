@@ -1,10 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../lib/openaiClient.js", () => ({
+vi.mock("../lib/providers/openaiClient.js", () => ({
   generateAgentReply: vi.fn(async () => "Plan response")
 }));
 
-vi.mock("../lib/missionControl.js", () => ({
+vi.mock("../lib/integrations/missionControl.js", () => ({
   listTasks: vi.fn(async () => []),
   createTask: vi.fn(async () => ({ id: "task-1" })),
   postMessage: vi.fn(async () => ({})),
@@ -48,7 +48,7 @@ describe("/api/agents/send", () => {
   });
 
   it("uses provided task_id directly", async () => {
-    const { postMessage } = await import("../lib/missionControl.js");
+    const { postMessage } = await import("../lib/integrations/missionControl.js");
     const app = buildApp();
     const response = await app.inject({
       method: "POST",
@@ -108,7 +108,7 @@ describe("/api/agents/send", () => {
   });
 
   it("finds existing task by title instead of creating new one", async () => {
-    const { listTasks, createTask } = await import("../lib/missionControl.js");
+    const { listTasks, createTask } = await import("../lib/integrations/missionControl.js");
     // Mock listTasks to return an existing task
     vi.mocked(listTasks).mockResolvedValueOnce([
       { id: "existing-task", title: "Existing Task", status: "in_progress" }

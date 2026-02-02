@@ -3,7 +3,7 @@
  * Following OpenClaw's usage tracking pattern.
  */
 
-import { TokenUsage } from "./openaiClient.js";
+import { TokenUsage } from "../providers/openaiClient.js";
 
 /**
  * Model pricing per 1M tokens (in USD).

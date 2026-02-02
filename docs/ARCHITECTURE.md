@@ -2,17 +2,26 @@
 
 ## Overview
 
-Wombat is a portable agent daemon that connects LLM-driven agents to a Mission Control backend.
-It exposes an HTTP entrypoint, generates agent responses, and writes messages/documents back to Mission Control.
+Wombat Ops is an **Agent Operations & Governance Platform** that provides operational guarantees, governance, and observability for AI agents in production.
+
+It connects LLM-driven agents to a Mission Control backend while providing:
+- **Full tracing** of every agent execution
+- **Versioned skill registry** with testing
+- **Tenant isolation** and budget controls
+- **Immutable audit logs** for compliance
+- **Data redaction** for PII protection
 
 ## Design Principles
 
-Wombat follows an [OpenClaw](https://openclaw.ai/)-inspired architecture:
+Wombat follows an [OpenClaw](https://openclaw.ai/)-inspired architecture with enterprise-grade operations:
 
 1. **Workspace-based configuration** - Agent personas and rules live in markdown files, not code
 2. **Backend-agnostic** - Works with any Mission Control-compatible backend
 3. **Multi-agent support** - Role-specific personas via `souls/<role>.md` files
 4. **Flexible task handling** - Backend can own task creation or delegate to wombat
+5. **Observable by default** - Every execution produces a queryable trace
+6. **Governance first** - Tenant isolation, permissions, and audit trails built-in
+7. **Skill versioning** - Immutable skill registry with testing and rollback
 
 ## Wombat vs OpenClaw
 
@@ -233,48 +242,110 @@ OpenClaw optimizes for broad personal capability across 50+ integrations. Wombat
 
 ## Core Components
 
+### Library Structure
+
+The codebase is organized into logical modules:
+
+```
+src/lib/
+├── core/           # Database, config
+├── auth/           # Authentication, tenant context
+├── tracing/        # Trace model, trace store
+├── skills/         # Skill manifest, registry, testing
+├── tools/          # Tool proxy, permissions
+├── governance/     # Audit logs, redaction, budgets
+├── providers/      # LLM providers, contracts
+├── workspace/      # Workspace management, versioning
+├── evals/          # Evaluation framework
+└── integrations/   # Mission Control, webhooks, costs
+```
+
 ### Daemon API (`src/server/index.ts`)
+
+**Core Endpoints:**
 
 | Endpoint | Description |
 |----------|-------------|
 | `POST /api/agents/send` | Main agent message endpoint |
+| `POST /api/agents/stream` | SSE streaming responses |
 | `POST /compact` | Summarize conversation history |
 | `POST /llm-task` | Structured JSON LLM task |
-| `POST /api/agents/stream` | SSE streaming responses |
-| `GET /health` | Health check with component status |
-| `GET /context` | Prompt size statistics |
-| `GET /usage` | Aggregate cost and usage stats |
-| `GET /skills` | List available skills |
-| `GET /boot` | Check BOOT.md status |
-| `POST /boot/complete` | Mark boot as complete |
+| `GET /health` | Health + database status |
 
-**Key behaviors:**
-- Validates `X-Agent-Daemon-Key` (optional)
-- Uses `session_key` to derive `user_id` and `agent_role`
-- Generates response with OpenAI using workspace-loaded prompts
-- Injects conversation history when provided
-- Injects time context (date, time, timezone) into system prompt
-- Returns token usage, cost breakdown, and context warnings
-- Writes to Mission Control (`messages`, `documents`)
+**Observability Endpoints:**
 
-### Workspace Loader (`src/lib/workspace.ts`)
-- Loads bootstrap files from configurable workspace path
-- Builds system prompts from `SOUL.md` + `AGENTS.md`
-- Supports per-role personas via `souls/<role>.md`
-- Falls back to generic prompt if no files exist
+| Endpoint | Description |
+|----------|-------------|
+| `GET /traces` | List traces with filtering |
+| `GET /traces/:id` | Get full trace details |
+| `GET /traces/:id/replay` | Get replay context |
 
-### Mission Control Client (`src/lib/missionControl.ts`)
-- HTTP client for Mission Control APIs
-- Tasks, messages, documents operations
-- Uses agent JWT authentication
+**Skill Registry Endpoints:**
 
-### Dispatcher (`src/scripts/notification_dispatcher.ts`)
-- Pulls undelivered notifications from backend
-- Forwards them to the daemon
-- Acks delivery back to backend
+| Endpoint | Description |
+|----------|-------------|
+| `POST /skills/publish` | Publish skill to registry |
+| `GET /skills/registry/:name` | Get skill from registry |
+| `POST /skills/registry/:name/test` | Run skill tests |
 
-### Heartbeat / Standup (`src/scripts/heartbeat.ts`, `src/scripts/daily_standup.ts`)
-- One-off utilities for status checks and daily summaries
+**Governance Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /audit` | Query audit logs |
+| `GET /budget` | Get tenant budget |
+| `POST /budget/check` | Check budget availability |
+
+**Evaluation Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /evals/run` | Run evaluation dataset |
+| `GET /evals/:id` | Get evaluation result |
+
+### Database (`src/lib/core/db.ts`)
+- SQLite with WAL mode for concurrency
+- Tables: traces, audit_log, skill_registry, tenant_budgets, workspace_versions, eval_results
+- Auto-initialization on startup
+
+### Tracing (`src/lib/tracing/`)
+- `trace.ts` - Trace model and TraceBuilder
+- `traceStore.ts` - SQLite-backed trace storage
+- Every request gets a UUID v7 trace ID
+
+### Skill System (`src/lib/skills/`)
+- `skillManifest.ts` - YAML manifest parsing with Zod validation
+- `skillRegistry.ts` - Versioned skill storage
+- `skillTester.ts` - Test runner for skill manifests
+- `skills.ts` - Workspace skill loader (legacy markdown support)
+
+### Governance (`src/lib/governance/`)
+- `auditLog.ts` - Immutable append-only audit log
+- `redaction.ts` - PII detection and redaction
+- `budgetManager.ts` - Per-tenant budget controls
+
+### Tool System (`src/lib/tools/`)
+- `toolProxy.ts` - Hybrid tool calling (Wombat defines, backend executes)
+- `toolPermissions.ts` - Two-layer permission checking
+
+### Workspace (`src/lib/workspace/`)
+- `workspace.ts` - Workspace loader for prompts
+- `workspaceVersioning.ts` - Content-addressable versioning
+
+### Providers (`src/lib/providers/`)
+- `llmProvider.ts` - Multi-provider abstraction via pi-ai
+- `providerContract.ts` - Normalized response types
+- `streaming.ts` - SSE streaming support
+
+### Integrations (`src/lib/integrations/`)
+- `missionControl.ts` - Backend API client
+- `webhooks.ts` - Completion callbacks
+- `costs.ts` - Usage tracking
+
+### Scripts (`src/scripts/`)
+- `notification_dispatcher.ts` - Polls and forwards notifications
+- `heartbeat.ts` - Status checks
+- `daily_standup.ts` - Daily summaries
 
 ## Workspace Layout
 
@@ -295,19 +366,94 @@ See [WORKSPACE.md](WORKSPACE.md) for the full specification.
 
 ## Data Flow
 
+### Request Flow with Tracing
+
 ```
-User -> Backend API
-  -> Mission Control message (task thread)
-  -> Dispatcher -> Wombat /api/agents/send
-  -> WorkspaceLoader builds system prompt
-  -> LLM generates response
-  -> Mission Control message (+ optional doc)
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Request Flow                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  Backend/User                                                        │
+│       │                                                              │
+│       ▼                                                              │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  Wombat /api/agents/send                                     │    │
+│  │  ┌─────────────────────────────────────────────────────────┐│    │
+│  │  │ 1. Generate Trace ID (UUID v7)                          ││    │
+│  │  │ 2. Extract Tenant Context (from JWT)                    ││    │
+│  │  │ 3. Check Budget                                         ││    │
+│  │  │ 4. Load Workspace (with version hash)                   ││    │
+│  │  │ 5. Load Skills (from registry)                          ││    │
+│  │  │ 6. Build System Prompt                                  ││    │
+│  │  └─────────────────────────────────────────────────────────┘│    │
+│  │                         │                                    │    │
+│  │                         ▼                                    │    │
+│  │  ┌─────────────────────────────────────────────────────────┐│    │
+│  │  │ LLM Provider (with tracing)                             ││    │
+│  │  │ - Record prompt tokens, completion tokens               ││    │
+│  │  │ - Track timing, model, cost                             ││    │
+│  │  └─────────────────────────────────────────────────────────┘│    │
+│  │                         │                                    │    │
+│  │                         ▼                                    │    │
+│  │  ┌─────────────────────────────────────────────────────────┐│    │
+│  │  │ Tool Calls (if any)                                     ││    │
+│  │  │ - Check skill permissions                               ││    │
+│  │  │ - Check tenant permissions                              ││    │
+│  │  │ - Proxy to backend                                      ││    │
+│  │  │ - Record in trace                                       ││    │
+│  │  └─────────────────────────────────────────────────────────┘│    │
+│  │                         │                                    │    │
+│  │                         ▼                                    │    │
+│  │  ┌─────────────────────────────────────────────────────────┐│    │
+│  │  │ Finalize                                                ││    │
+│  │  │ - Save trace to SQLite                                  ││    │
+│  │  │ - Record to audit log                                   ││    │
+│  │  │ - Update budget spent                                   ││    │
+│  │  │ - Post to Mission Control                               ││    │
+│  │  │ - Return response + trace_id                            ││    │
+│  │  └─────────────────────────────────────────────────────────┘│    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Tool Calling Flow
+
+```
+LLM Response (with tool calls)
+       │
+       ▼
+┌─────────────────────┐
+│ Parse Tool Calls    │
+└─────────────────────┘
+       │
+       ▼
+┌─────────────────────┐
+│ For each tool call: │
+│  1. Check skill     │ ─── Denied? ──▶ Log + Skip
+│     permissions     │
+│  2. Check tenant    │ ─── Denied? ──▶ Log + Skip
+│     permissions     │
+│  3. Proxy to        │
+│     backend         │
+│  4. Record result   │
+└─────────────────────┘
+       │
+       ▼
+┌─────────────────────┐
+│ Format results      │
+│ for LLM             │
+└─────────────────────┘
+       │
+       ▼
+  Continue LLM loop
 ```
 
 ## Auth Model
 
 - **Daemon request auth**: optional `X-Agent-Daemon-Key` header
 - **Agent auth to backend**: `X-Agent-Token` (JWT minted by Wombat using `AGENT_JWT_SECRET`)
+- **Tenant context**: Extracted from JWT claims (tenant_id, user_id, permissions)
 - **Dispatcher auth**: `X-Internal-Token` (backend internal token)
 
 ## Task Resolution
@@ -592,10 +738,12 @@ OpenClaw documents "blast radius" for each tool (local vs network vs irreversibl
 If an agent behaves unexpectedly:
 
 1. **Immediate:** Check `AGENT_DAEMON_API_KEY` - rotate if compromised
-2. **Audit:** Review Mission Control activity trail (`mc_activities`)
-3. **Contain:** Disable notifications to affected agent roles
-4. **Investigate:** Check workspace files for prompt injection attempts
-5. **Remediate:** Update AGENTS.md with additional safety rules
+2. **Get the trace:** Use the `trace_id` from the response to get full details
+3. **Audit:** Query audit log: `GET /audit?trace_id=...`
+4. **Review steps:** Examine LLM calls, tool calls, and any permission denials
+5. **Contain:** Disable notifications to affected agent roles
+6. **Investigate:** Check workspace files for prompt injection attempts
+7. **Remediate:** Update AGENTS.md with additional safety rules
 
 ### Workspace Security
 
@@ -622,3 +770,12 @@ Include these rules in your AGENTS.md (see [WORKSPACE.md](WORKSPACE.md#agentsmd-
 
 See `docs/examples/` for example workspace configurations:
 - `docs/examples/zenvy/` - Zenvy School Finder multi-agent setup
+
+---
+
+## Related Documentation
+
+- [GOVERNANCE.md](GOVERNANCE.md) - Audit logs, redaction, budgets, permissions
+- [OPERATIONS.md](OPERATIONS.md) - Tracing, evaluations, skill registry, workspace versioning
+- [API.md](API.md) - Full API reference
+- [WORKSPACE.md](WORKSPACE.md) - Workspace file specification

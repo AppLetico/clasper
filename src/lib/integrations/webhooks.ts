@@ -3,8 +3,8 @@
  * Sends POST requests to configured webhook URLs on completion.
  */
 
-import { config } from "./config.js";
-import type { TokenUsage } from "./openaiClient.js";
+import { config } from "../core/config.js";
+import type { TokenUsage } from "../providers/openaiClient.js";
 import type { CostBreakdown } from "./costs.js";
 
 /**

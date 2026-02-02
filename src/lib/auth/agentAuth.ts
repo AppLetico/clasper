@@ -1,5 +1,5 @@
 import { SignJWT } from "jose";
-import { config } from "./config.js";
+import { config } from "../core/config.js";
 
 export function parseSessionKey(sessionKey: string): { userId: string; role: string } {
   const parts = sessionKey.split(":");

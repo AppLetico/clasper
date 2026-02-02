@@ -1,4 +1,4 @@
-import { config, requireEnv } from "../lib/config.js";
+import { config, requireEnv } from "../lib/core/config.js";
 
 const AGENT_DAEMON_URL = process.env.AGENT_DAEMON_URL || "http://localhost:8081";
 const internalToken = process.env.INTERNAL_TOKEN || "";

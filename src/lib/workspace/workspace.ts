@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
-import { config } from "./config.js";
-import { getSkillsLoader, type SkillsContext } from "./skills.js";
+import { config } from "../core/config.js";
+import { getSkillsLoader, type SkillsContext } from "../skills/skills.js";
 
 /**
  * Maximum characters per bootstrap file before truncation.

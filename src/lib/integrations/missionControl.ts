@@ -1,4 +1,4 @@
-import { config } from "./config.js";
+import { config } from "../core/config.js";
 
 export type MissionControlMessage = {
   task_id: string;

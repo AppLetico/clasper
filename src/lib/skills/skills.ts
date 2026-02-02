@@ -13,7 +13,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { config } from "./config.js";
+import { config } from "../core/config.js";
 
 /**
  * Parsed skill from SKILL.md file.
