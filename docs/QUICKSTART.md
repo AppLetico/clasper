@@ -109,8 +109,26 @@ curl -X POST http://localhost:8081/health
 # {"status":"ok"}
 ```
 
+## Ops Console (Optional)
+
+The Operations Console is served at `/ops` and is protected by OIDC + RBAC.
+
+To enable it, configure these environment variables:
+
+```bash
+OPS_OIDC_ISSUER=
+OPS_OIDC_AUDIENCE=
+OPS_OIDC_JWKS_URL=
+OPS_RBAC_CLAIM=roles
+OPS_TENANT_CLAIM=tenant_id
+```
+
+See [GOVERNANCE.md](GOVERNANCE.md) for RBAC configuration details.
+
 ## Next steps
 
 - [WORKSPACE.md](WORKSPACE.md) - Configure your agent personas
 - [API.md](API.md) - API reference
+- [GOVERNANCE.md](GOVERNANCE.md) - RBAC, budgets, and audit
+- [OPERATIONS.md](OPERATIONS.md) - Tracing, replay, and skill lifecycle
 - [INTEGRATION.md](INTEGRATION.md) - Backend integration guide

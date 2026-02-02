@@ -2,14 +2,16 @@
 
 ## Overview
 
-Wombat Ops is an **Agent Operations & Governance Platform** that provides operational guarantees, governance, and observability for AI agents in production.
+Wombat is a **Production Agent Runtime with Governance & Observability** — an API-first, stateless agent execution platform designed for multi-tenant SaaS backends.
 
-It connects LLM-driven agents to a Mission Control backend while providing:
-- **Full tracing** of every agent execution
-- **Versioned skill registry** with testing
-- **Tenant isolation** and budget controls
+It integrates with your backend via the **Control Plane Contract** while providing:
+- **Full execution traces** with replay, diff, and annotations
+- **Versioned skill registry** with lifecycle states and testing
+- **Tenant isolation** with RBAC and budget controls
 - **Immutable audit logs** for compliance
-- **Data redaction** for PII protection
+- **PII redaction** with configurable patterns
+- **Cost forecasting** and risk scoring
+- **Workspace versioning** with environment promotions
 
 ## Design Principles
 

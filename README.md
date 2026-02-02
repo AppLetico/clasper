@@ -4,12 +4,12 @@
   <img src="wombat-banner.png" alt="Wombat" width="100%" />
 </p>
 
-<h2 align="center">Agent Operations & Governance Platform</h2>
+<h2 align="center">Production Agent Runtime with Governance & Observability</h2>
 
 <p align="center">
   <b>SHIP IT. DIG DEEP.</b>
   <br />
-  <i>Safe, explainable, and shippable AI agents for multi-tenant SaaS products.</i>
+  <i>Safe, explainable, and shippable AI agents for multi-tenant SaaS backends.</i>
 </p>
 
 <p align="center">
@@ -18,6 +18,34 @@
   <img src="https://img.shields.io/badge/built_with-TypeScript-blue.svg" alt="TypeScript">
   <img src="https://img.shields.io/badge/status-Beta-yellow.svg" alt="Status">
 </p>
+
+---
+
+**Wombat** is an API-first, stateless agent execution platform designed for **production SaaS integration**. It enables workspace-driven agents with **traceable behavior, governance controls, role-based access, cost/risk guards, and operational visibility** — suitable for multi-tenant backends and audit-intensive environments.
+
+Inspired by [OpenClaw](https://openclaw.ai/)'s workspace pattern, Wombat adapts these ideas into a **multi-tenant, stateless, API-first orchestration and governance platform** for backend agents.
+
+> *"AI agents are not demos. They are production systems."*
+> Read the [Wombat Ops Manifesto](docs/MANIFESTO.md)
+
+---
+
+## What Wombat Is
+
+- **Stateless HTTP runtime** for agent executions
+- **Workspace-driven prompt config** (SOUL.md, AGENTS.md, HEARTBEAT.md, skills)
+- **Multi-tenant context isolation** with per-user scoping
+- **Skill registry** with versioning, lifecycle states, and testing
+- **Observable and explainable traces** with diff, replay, and annotations
+- **Operational guardrails** (RBAC, budgets, risk scoring, audit logs)
+- **Control Plane Contract** for portable backend integration
+
+## What Wombat Is Not
+
+- A daemon for OS/browser automation (no shell access, no file system)
+- A personal agent chatbot (designed for backend integration, not direct chat)
+- A general automation framework like OpenClaw (stateless, no persistent sessions)
+- A replacement for your backend (your system remains the source of truth)
 
 ---
 
@@ -33,52 +61,95 @@
 
 **Stack**: TypeScript + Fastify + SQLite | Multi-provider LLM | Full tracing | Budget controls | Risk scoring
 
-Inspired by [OpenClaw](https://openclaw.ai/)'s workspace pattern, Wombat Ops brings operational guarantees, governance, and observability to AI agents in production.
+---
 
-> *"AI agents are not demos. They are production systems."*  
-> Read the [Wombat Ops Manifesto](docs/MANIFESTO.md)
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Client / UI                              │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────┐
+│                     Wombat Ops API                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │ Agent API   │  │ Ops Console │  │ Governance              │  │
+│  │ /api/agents │  │ /ops        │  │ RBAC, Budgets, Risk     │  │
+│  └──────┬──────┘  └──────┬──────┘  └────────────┬────────────┘  │
+│         │                │                      │               │
+│  ┌──────▼────────────────▼──────────────────────▼────────────┐  │
+│  │                    Trace Store                            │  │
+│  │           (SQLite: traces, audit, retention)              │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ Control Plane Contract (HTTP)
+┌─────────────────────────────▼───────────────────────────────────┐
+│                      Your Backend                               │
+│              (Tasks, Documents, Notifications)                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Wombat integrates with your backend via the **Control Plane Contract** — a standardized HTTP API for tasks, messages, and documents. Your backend remains the source of truth; Wombat handles reasoning, execution, and governance.
 
 ---
 
-## What Wombat Ops Does
+## Execution Modes
 
-**Agent Runtime**
-- HTTP API for agent messages (`/api/agents/send`, `/api/agents/stream`)
-- Workspace-driven prompts (personas, rules, memory, skills)
-- Mission Control integration for tasks/messages/documents
+| Mode | Endpoint | Description |
+|------|----------|-------------|
+| **Request/Response** | `POST /api/agents/send` | Synchronous agent execution |
+| **Streaming (SSE)** | `POST /api/agents/stream` | Real-time streaming responses |
+| **LLM Task** | `POST /llm-task` | Structured JSON-only output |
+| **Trace Replay** | `GET /traces/:id/replay` | Reproduce past executions |
+| **Ops Console** | `/ops/*` | OIDC-protected operational UI |
 
-**Observability**
-- Every request gets a trace ID for correlation
-- Full traces: LLM calls, tool calls, costs, timing
+---
+
+## Operational Features
+
+These are first-class capabilities, not afterthoughts:
+
+### Execution Traces
+- Full trace model with LLM calls, tool calls, costs, timing
 - Trace diff API for debugging regressions
 - Labels & annotations for trace organization
+- Entity linking (task → trace → document)
 - Per-tenant retention policies
-- Entity linking (task, document, message)
-- Operations Console at `/ops` (OIDC + RBAC)
 
-**Governance**
-- Per-tenant budget controls with hard/soft limits
-- Cost forecasting before execution
-- Risk scoring based on tool breadth, skill maturity, temperature, and data sensitivity
-- Tool permission system with skill declarations
-- Immutable audit logs for compliance
-- PII redaction with configurable patterns
+### Role-Based Access Control (RBAC)
+- Action-level permissions with enforced scopes
+- Resolved permissions at `/ops/api/me`
+- Tenant isolation via JWT claims
+- Non-admin users never receive raw prompt/tool payloads
 
-**Skills & Versioning**
-- Structured YAML skill manifests
-- Skill registry with immutable versions
-- Skill lifecycle states (draft → tested → approved → active → deprecated)
-- Built-in test harness
+### Override Model
+- Structured overrides with `reason_code` + `justification`
+- All overrides audited as `ops_override_used`
+- Break-glass workflow for emergency access
+
+### Cost & Risk Controls
+- Per-tenant budget controls (hard/soft limits)
+- Pre-execution cost forecasting
+- Risk scoring based on tool breadth, skill maturity, temperature, data sensitivity
+- Dashboards with coverage metadata
+
+### Environment & Promotion
 - Workspace versioning with rollback
 - Workspace pinning per environment (dev/staging/prod)
-- Environment promotion flows
-- Impact analysis before changes
+- Environment promotion flows with impact analysis
+- Safe promotions with pre-flight checks
+
+### Audit & Compliance
+- Immutable audit logs for all actions
+- PII redaction with configurable patterns
+- Retention enforcement with cleanup
+- Audit API with pagination (`GET /ops/api/audit`)
 
 ---
 
 ## Quickstart
 
-**Fastest start (one command):**
+### Fastest Start (One Command)
 
 ```bash
 make setup
@@ -87,16 +158,16 @@ make setup
 
 `make setup` installs dependencies, copies `.env.example` to `.env` if missing, and scaffolds a workspace from the built-in template.
 
----
+### Step-by-Step
 
-### 1) Install
+#### 1) Install
 
 ```bash
 npm install
 cp .env.example .env
 ```
 
-### 2) Create a workspace
+#### 2) Create a Workspace
 
 Scaffold a workspace from the built-in template:
 
@@ -106,7 +177,7 @@ npm run init-workspace
 # or: npx wombat init
 ```
 
-### 3) Configure environment
+#### 3) Configure Environment
 
 ```bash
 # Required
@@ -129,7 +200,7 @@ WOMBAT_WORKSPACE=./workspace
 WOMBAT_DB_PATH=./wombat.db
 ```
 
-### 4) Run
+#### 4) Run
 
 ```bash
 # Dev
@@ -139,9 +210,9 @@ npm run dev
 npm run build && npm start
 ```
 
-### Ops Console (v1.2.1)
+#### 5) Configure Ops Console (Optional)
 
-The Operations Console is served from the same daemon at `/ops` and is protected by OIDC + RBAC.
+The Operations Console is served at `/ops` and is protected by OIDC + RBAC.
 
 Required env vars:
 
@@ -155,7 +226,7 @@ OPS_WORKSPACE_CLAIM=workspace_id
 OPS_ALLOWED_TENANTS_CLAIM=allowed_tenants
 ```
 
-Optional Ops Console env vars:
+Optional env vars:
 
 ```
 # Deep link templates (use {id} placeholder)
@@ -164,16 +235,90 @@ DEEP_LINK_DOC_TEMPLATE=
 DEEP_LINK_MSG_TEMPLATE=
 ```
 
-v1.2.1 hardening highlights:
-- Action-level RBAC with resolved permissions at `/ops/api/me`
-- Break-glass overrides require reason_code + justification, audited as `ops_override_used`
-- Dashboards include retention/sampling coverage metadata
-- Non-admin users never receive raw prompt/tool payloads in trace detail
-- New audit API: `GET /ops/api/audit` with pagination
+---
+
+## Wombat vs OpenClaw
+
+Wombat was inspired by OpenClaw's workspace pattern but evolved for a different context: **multi-tenant SaaS backends** with **production governance requirements**.
+
+| Feature | OpenClaw | Wombat |
+|---------|----------|--------|
+| **Deployment** | Persistent daemon | Stateless HTTP service |
+| **Target context** | Single user / personal assistant | Multi-tenant SaaS backends |
+| **Tools access** | High-privilege (shell, browser, filesystem) | API-scoped, safe tools via Control Plane |
+| **Traceability** | Log history | Full trace model + replay + diff |
+| **Governance** | Optional / user-controlled | Core enforced (RBAC, budgets, audit) |
+| **RBAC** | Not natively supported | Built-in action-level permissions |
+| **Cost controls** | Manual | Forecast + budgets + hard limits |
+| **Risk visibility** | N/A | Risk scoring + dashboards |
+| **Memory** | Local filesystem | Backend database via Control Plane |
+| **Suitability** | Personal assistants | Production backend integrations |
+
+### What Wombat Adopts from OpenClaw
+
+| Pattern | Description |
+|---------|-------------|
+| `AGENTS.md` | Operating rules and safety guidelines |
+| `SOUL.md` / `souls/<role>.md` | Agent personas (single or multi-agent) |
+| `HEARTBEAT.md` | Periodic check-in checklist |
+| `IDENTITY.md` | Agent branding and identity |
+| `TOOLS.md` | Tool usage notes |
+| `skills/*/SKILL.md` | OpenClaw-compatible skill format |
+| `HEARTBEAT_OK` contract | Silent acknowledgment pattern |
+
+### What Wombat Does Differently
+
+| Pattern | OpenClaw | Wombat |
+|---------|----------|--------|
+| `memory/` directory | Local filesystem | Backend database |
+| Session persistence | Persistent daemon state | Stateless (no sessions) |
+| Self-modifying prompts | Agent can edit workspace | Workspace is read-only |
+| Shell/browser access | Full system access | API-only via Control Plane |
+| Cron jobs | Built-in scheduler | Backend handles scheduling |
 
 ---
 
-## API at a Glance
+## Control Plane Integration
+
+Wombat integrates with your backend via the **Control Plane Contract v1** — a standardized HTTP API.
+
+### Adoption Checklist
+
+When integrating Wombat with a new backend:
+
+- [ ] Implement the **Control Plane Contract v1** endpoints
+- [ ] Ensure `X-Agent-Token` JWTs validate and enforce `user_id` scoping
+- [ ] Support `idempotency_key` on create endpoints
+- [ ] Run conformance: `npm run conformance`
+- [ ] Optional: add notifications, SSE events, heartbeat/standup
+
+### Required Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/mission-control/capabilities` | Feature discovery |
+| `GET /api/mission-control/tasks` | List tasks |
+| `POST /api/mission-control/tasks` | Create task |
+| `POST /api/mission-control/messages` | Post message |
+| `POST /api/mission-control/documents` | Create document |
+
+### Optional Endpoints
+
+| Feature | Endpoints |
+|---------|-----------|
+| Notifications | `GET /dispatch/undelivered`, `POST /dispatch/.../deliver` |
+| Realtime (SSE) | `GET /events` |
+| Heartbeat/Standup | `POST /heartbeat`, `POST /standup` |
+| Tool approvals | `POST/GET/PATCH /tool-requests` |
+
+See:
+- [docs/CONTROL_PLANE_CONTRACT.md](docs/CONTROL_PLANE_CONTRACT.md)
+- [docs/CONTROL_PLANE_QUICKSTART.md](docs/CONTROL_PLANE_QUICKSTART.md)
+- [examples/mission-control-lite/](examples/mission-control-lite/)
+
+---
+
+## API Reference
 
 ### Core Endpoints
 
@@ -193,11 +338,11 @@ v1.2.1 hardening highlights:
 | `GET /traces/:id` | Get full trace details |
 | `GET /traces/:id/replay` | Get replay context for a trace |
 | `GET /traces/stats` | Trace statistics |
-| `POST /traces/diff` | Compare two traces (v1.1) |
-| `POST /traces/:id/label` | Add labels to traces (v1.1) |
-| `POST /traces/:id/annotate` | Add annotations (v1.1) |
-| `GET /traces/by-label` | Find traces by label (v1.1) |
-| `GET /traces/by-entity` | Find traces by entity link (v1.1) |
+| `POST /traces/diff` | Compare two traces |
+| `POST /traces/:id/label` | Add labels to traces |
+| `POST /traces/:id/annotate` | Add annotations |
+| `GET /traces/by-label` | Find traces by label |
+| `GET /traces/by-entity` | Find traces by entity link |
 
 ### Skills & Registry
 
@@ -208,9 +353,9 @@ v1.2.1 hardening highlights:
 | `GET /skills/registry/:name/versions` | List all versions of a skill |
 | `POST /skills/registry/:name/test` | Run skill tests |
 | `GET /skills` | List loaded workspace skills |
-| `POST /skills/:name/:version/promote` | Promote skill lifecycle state (v1.1) |
-| `GET /skills/:name/:version/state` | Get skill state (v1.1) |
-| `GET /skills/by-state` | List skills by state (v1.1) |
+| `POST /skills/:name/:version/promote` | Promote skill lifecycle state |
+| `GET /skills/:name/:version/state` | Get skill state |
+| `GET /skills/by-state` | List skills by state |
 
 ### Governance
 
@@ -218,14 +363,14 @@ v1.2.1 hardening highlights:
 |----------|---------|
 | `GET /audit` | Query audit logs |
 | `GET /audit/stats` | Audit statistics |
-| `GET /ops/api/audit` | Ops audit log (OIDC + RBAC, v1.2.1) |
+| `GET /ops/api/audit` | Ops audit log (OIDC + RBAC) |
 | `GET /budget` | Get tenant budget |
 | `POST /budget` | Set tenant budget |
 | `POST /budget/check` | Check if spend is within budget |
-| `POST /cost/forecast` | Pre-execution cost estimate (v1.1) |
-| `POST /risk/score` | Calculate execution risk score (v1.1) |
+| `POST /cost/forecast` | Pre-execution cost estimate |
+| `POST /risk/score` | Calculate execution risk score |
 
-### Retention (v1.1)
+### Retention
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -234,7 +379,7 @@ v1.2.1 hardening highlights:
 | `POST /retention/enforce` | Enforce retention (cleanup old traces) |
 | `GET /retention/stats` | Retention statistics |
 
-### Workspace (v1.1)
+### Workspace
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -246,13 +391,6 @@ v1.2.1 hardening highlights:
 | `POST /workspace/envs/promote` | Promote between environments |
 | `POST /workspace/envs/init` | Initialize standard environments |
 | `POST /workspace/impact` | Analyze change impact |
-
-### Control Plane (v1.1)
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/version` | Wombat version and features |
-| `GET /api/compatibility` | Check control plane compatibility |
 
 ### Evaluations
 
@@ -284,8 +422,6 @@ Wombat supports multiple LLM providers via [pi-ai](https://github.com/badlogic/p
 
 ## Library Structure
 
-The library is organized into logical modules:
-
 ```
 src/lib/
 ├── core/           # Database, config
@@ -297,21 +433,8 @@ src/lib/
 ├── providers/      # LLM providers, contracts
 ├── workspace/      # Workspace mgmt, versioning, pins, environments, impact
 ├── evals/          # Evaluation framework
-└── integrations/   # Mission Control, webhooks, costs, control plane version
+└── integrations/   # Control Plane client, webhooks, costs
 ```
-
----
-
-## Documentation
-
-- [docs/MANIFESTO.md](docs/MANIFESTO.md) - Our philosophy and principles
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Getting started
-- [docs/API.md](docs/API.md) - Full API reference
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
-- [docs/GOVERNANCE.md](docs/GOVERNANCE.md) - Audit, redaction, budgets
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) - Tracing, evals, versioning
-- [docs/WORKSPACE.md](docs/WORKSPACE.md) - Workspace specification
-- [docs/CONTROL_PLANE_CONTRACT.md](docs/CONTROL_PLANE_CONTRACT.md) - Backend integration
 
 ---
 
@@ -330,20 +453,19 @@ A **Makefile** is provided for common tasks: `make setup`, `make dev`, `make tes
 
 ---
 
-## Control Plane Adoption Checklist
+## Documentation
 
-When integrating Wombat with a new backend:
-
-- [ ] Implement the **Control Plane Contract v1** endpoints
-- [ ] Ensure `X-Agent-Token` JWTs validate and enforce `user_id` scoping
-- [ ] Support `idempotency_key` on create endpoints
-- [ ] Run conformance: `npm run conformance`
-- [ ] Optional: add notifications, SSE events, heartbeat/standup
-
-See:
-- [docs/CONTROL_PLANE_CONTRACT.md](docs/CONTROL_PLANE_CONTRACT.md)
-- [docs/CONTROL_PLANE_QUICKSTART.md](docs/CONTROL_PLANE_QUICKSTART.md)
-- [examples/mission-control-lite/](examples/mission-control-lite/)
+| Document | Description |
+|----------|-------------|
+| [docs/MANIFESTO.md](docs/MANIFESTO.md) | Our philosophy and principles |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture and design |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Tracing, evals, versioning, ops console |
+| [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | Audit, redaction, budgets, RBAC |
+| [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace specification (SOUL, AGENTS, skills) |
+| [docs/CONTROL_PLANE_CONTRACT.md](docs/CONTROL_PLANE_CONTRACT.md) | Backend integration contract |
+| [docs/CONTROL_PLANE_QUICKSTART.md](docs/CONTROL_PLANE_QUICKSTART.md) | Integration quickstart guide |
+| [docs/API.md](docs/API.md) | Full API reference |
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | Getting started guide |
 
 ---
 
