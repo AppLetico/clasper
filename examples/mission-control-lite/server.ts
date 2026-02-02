@@ -48,6 +48,27 @@ const tasks: Task[] = [];
 const messages: Message[] = [];
 const documents: Document[] = [];
 
+const featureList = [
+  "task_list",
+  "task_create",
+  "message_post",
+  "document_post",
+  "tool_discover",
+  "tool_execute"
+];
+
+const toolDefinitions = [
+  {
+    name: "echo",
+    description: "Echo back provided arguments.",
+    parameters: {
+      type: "object",
+      properties: { message: { type: "string" } },
+      required: ["message"]
+    }
+  }
+];
+
 const idempotency = {
   tasks: new Map<string, IdempotencyRecord>(),
   messages: new Map<string, IdempotencyRecord>(),
@@ -77,6 +98,19 @@ async function authenticate(req: any): Promise<Actor> {
 
 app.get("/health", async () => ({ status: "ok" }));
 
+app.get("/api/capabilities", async () => ({
+  version: "0.1.0",
+  contract_version: "1.1.0",
+  features: featureList,
+  endpoints: [
+    "/api/mission-control/tasks",
+    "/api/mission-control/messages",
+    "/api/mission-control/documents",
+    "/api/tools",
+    "/api/tools/{tool_name}"
+  ]
+}));
+
 app.get("/api/mission-control/capabilities", async (req, reply) => {
   try {
     await authenticate(req);
@@ -84,7 +118,9 @@ app.get("/api/mission-control/capabilities", async (req, reply) => {
     return reply.status(401).send({ error: (err as Error).message });
   }
   return {
-    contract_version: "v1",
+    version: "0.1.0",
+    contract_version: "1.1.0",
+    features_list: featureList,
     features: {
       tasks: true,
       messages: true,
@@ -214,13 +250,36 @@ app.post("/api/mission-control/documents", async (req, reply) => {
     task_id: body.task_id,
     title: body.title,
     content: body.content,
-    doc_type: body.doc_type
+    doc_type: body.doc_type === "plan" ? "deliverable" : body.doc_type
   };
   documents.push(doc);
   if (key) {
     idempotency.documents.set(key, { requestHash: hashPayload(body), response: doc });
   }
   return doc;
+});
+
+app.get("/api/tools", async (req, reply) => {
+  try {
+    await authenticate(req);
+  } catch (err) {
+    return reply.status(401).send({ error: (err as Error).message });
+  }
+  return { tools: toolDefinitions };
+});
+
+app.post("/api/tools/:name", async (req, reply) => {
+  try {
+    await authenticate(req);
+  } catch (err) {
+    return reply.status(401).send({ error: (err as Error).message });
+  }
+  const toolName = (req.params as any)?.name;
+  const body: any = req.body || {};
+  if (toolName === "echo") {
+    return { message: body?.arguments?.message ?? null };
+  }
+  return reply.status(404).send({ error: "tool not found" });
 });
 
 app.listen({ port, host: "0.0.0.0" }).catch((err) => {
