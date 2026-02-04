@@ -211,4 +211,4 @@ These are not required for baseline compatibility, but unlock extra features:
 
 - Clasper Integration Guide: `docs/INTEGRATION.md`
 - Clasper API: `docs/API.md`
-- OpenAPI: `docs/control-plane.openapi.yaml`
+- OpenAPI: `contracts/control-plane.openapi.yaml`
