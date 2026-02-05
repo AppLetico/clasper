@@ -49,6 +49,12 @@ export interface RiskScoringInput {
   
   /** Custom risk flags */
   customFlags?: string[];
+
+  /** Adapter risk class */
+  adapterRiskClass?: 'low' | 'medium' | 'high' | 'critical';
+
+  /** Requested adapter capabilities */
+  requestedCapabilities?: string[];
 }
 
 /**
@@ -68,6 +74,7 @@ export interface RiskScore {
     modelVolatility: number;
     dataSensitivity: number;
     customFactors: number;
+    adapterRisk: number;
   };
   
   /** Risk factors identified */
@@ -85,11 +92,12 @@ export interface RiskScore {
  * Weight for each risk factor (should sum to 1)
  */
 const FACTOR_WEIGHTS = {
-  toolBreadth: 0.25,
-  skillMaturity: 0.25,
-  modelVolatility: 0.20,
+  toolBreadth: 0.20,
+  skillMaturity: 0.20,
+  modelVolatility: 0.15,
   dataSensitivity: 0.20,
   customFactors: 0.10,
+  adapterRisk: 0.15,
 };
 
 /**
@@ -127,6 +135,16 @@ const DATA_SENSITIVITY_RISK: Record<string, number> = {
   pii: 100,
 };
 
+/**
+ * Adapter risk mapping
+ */
+const ADAPTER_RISK: Record<string, number> = {
+  low: 10,
+  medium: 40,
+  high: 70,
+  critical: 90,
+};
+
 // ============================================================================
 // Risk Calculation
 // ============================================================================
@@ -141,6 +159,7 @@ export function calculateRiskScore(input: RiskScoringInput): RiskScore {
     modelVolatility: calculateModelVolatilityRisk(input),
     dataSensitivity: calculateDataSensitivityRisk(input),
     customFactors: calculateCustomFactorsRisk(input),
+    adapterRisk: calculateAdapterRisk(input),
   };
   
   // Calculate weighted score
@@ -149,7 +168,8 @@ export function calculateRiskScore(input: RiskScoringInput): RiskScore {
     factors.skillMaturity * FACTOR_WEIGHTS.skillMaturity +
     factors.modelVolatility * FACTOR_WEIGHTS.modelVolatility +
     factors.dataSensitivity * FACTOR_WEIGHTS.dataSensitivity +
-    factors.customFactors * FACTOR_WEIGHTS.customFactors
+    factors.customFactors * FACTOR_WEIGHTS.customFactors +
+    factors.adapterRisk * FACTOR_WEIGHTS.adapterRisk
   ));
   
   const level = scoreToLevel(score);
@@ -242,6 +262,22 @@ function calculateCustomFactorsRisk(input: RiskScoringInput): number {
 }
 
 /**
+ * Calculate adapter risk
+ */
+function calculateAdapterRisk(input: RiskScoringInput): number {
+  if (!input.adapterRiskClass) {
+    return 0;
+  }
+
+  const baseRisk = ADAPTER_RISK[input.adapterRiskClass] || 0;
+  const capabilityRisk = input.requestedCapabilities
+    ? Math.min(30, input.requestedCapabilities.length * 5)
+    : 0;
+
+  return Math.min(100, baseRisk + capabilityRisk);
+}
+
+/**
  * Convert score to risk level
  */
 function scoreToLevel(score: number): RiskLevel {
@@ -292,6 +328,10 @@ function identifyRiskFactors(
   if (input.customFlags && input.customFlags.length > 0) {
     risks.push(`Custom risk flags: ${input.customFlags.join(', ')}`);
   }
+
+  if (input.adapterRiskClass) {
+    risks.push(`Adapter risk class: ${input.adapterRiskClass}`);
+  }
   
   return risks;
 }
@@ -323,6 +363,10 @@ function generateRecommendations(
   
   if (input.dataSensitivity === 'pii' || input.dataSensitivity === 'high') {
     recommendations.push('Ensure proper data redaction is configured');
+  }
+
+  if (input.adapterRiskClass && (input.adapterRiskClass === 'high' || input.adapterRiskClass === 'critical')) {
+    recommendations.push('Require approval for high-risk adapter usage');
   }
   
   return recommendations;
@@ -361,6 +405,7 @@ export function formatRiskScore(score: RiskScore): string {
   lines.push(`  Skill Maturity: ${score.factors.skillMaturity}`);
   lines.push(`  Model Volatility: ${score.factors.modelVolatility}`);
   lines.push(`  Data Sensitivity: ${score.factors.dataSensitivity}`);
+  lines.push(`  Adapter Risk: ${score.factors.adapterRisk}`);
   
   if (score.riskFactors.length > 0) {
     lines.push('');

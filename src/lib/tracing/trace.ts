@@ -40,9 +40,11 @@ export interface LLMCallStep {
 export interface ToolCallStep {
   toolCallId: string;
   toolName: string;
-  arguments: unknown; // May be redacted
+  arguments?: unknown; // May be redacted
   permitted: boolean;
   permissionReason?: string;
+  tool_token_jti?: string;
+  tool_token_scope_hash?: string;
 }
 
 /**
@@ -73,6 +75,9 @@ export interface TraceStep {
   timestamp: string; // ISO 8601
   durationMs: number;
   data: LLMCallStep | ToolCallStep | ToolResultStep | ErrorStep;
+  step_id?: string;
+  prev_step_hash?: string | null;
+  step_hash?: string;
 }
 
 /**
@@ -81,11 +86,29 @@ export interface TraceStep {
 export interface ToolCallTrace {
   id: string;
   name: string;
-  arguments: unknown; // May be redacted
-  result: unknown; // May be redacted
+  arguments?: unknown; // May be redacted
+  result?: unknown; // May be redacted
   durationMs: number;
   permitted: boolean;
   success: boolean;
+}
+
+export interface GrantedScope {
+  capabilities: string[];
+  max_steps: number;
+  max_cost: number;
+}
+
+export interface UsedScope {
+  capabilities: string[];
+  step_count: number;
+  actual_cost: number;
+}
+
+export interface ExecutionViolation {
+  type: string;
+  message: string;
+  timestamp: string;
 }
 
 /**
@@ -144,6 +167,17 @@ export interface AgentTrace {
   taskId?: string;
   documentId?: string;
   messageId?: string;
+
+  // Adapter governance
+  adapter_id?: string;
+  granted_scope?: GrantedScope;
+  used_scope?: UsedScope;
+  violations?: ExecutionViolation[];
+
+  // Integrity
+  integrity_status?: 'verified' | 'compromised' | 'unsigned' | 'unverified';
+  integrity_failures?: string[];
+  integrity_checked_at?: string;
 }
 
 // ============================================================================
@@ -166,6 +200,8 @@ export const ToolCallStepSchema = z.object({
   arguments: z.unknown(),
   permitted: z.boolean(),
   permissionReason: z.string().optional(),
+  tool_token_jti: z.string().optional(),
+  tool_token_scope_hash: z.string().optional(),
 });
 
 export const ToolResultStepSchema = z.object({
@@ -192,6 +228,9 @@ export const TraceStepSchema = z.object({
     ToolResultStepSchema,
     ErrorStepSchema,
   ]),
+  step_id: z.string().optional(),
+  prev_step_hash: z.string().nullable().optional(),
+  step_hash: z.string().optional(),
 });
 
 export const ToolCallTraceSchema = z.object({
@@ -202,6 +241,24 @@ export const ToolCallTraceSchema = z.object({
   durationMs: z.number(),
   permitted: z.boolean(),
   success: z.boolean(),
+});
+
+export const GrantedScopeSchema = z.object({
+  capabilities: z.array(z.string()),
+  max_steps: z.number(),
+  max_cost: z.number(),
+});
+
+export const UsedScopeSchema = z.object({
+  capabilities: z.array(z.string()),
+  step_count: z.number(),
+  actual_cost: z.number(),
+});
+
+export const ExecutionViolationSchema = z.object({
+  type: z.string(),
+  message: z.string(),
+  timestamp: z.string(),
 });
 
 export const AgentTraceSchema = z.object({
@@ -238,6 +295,13 @@ export const AgentTraceSchema = z.object({
   taskId: z.string().optional(),
   documentId: z.string().optional(),
   messageId: z.string().optional(),
+  adapter_id: z.string().optional(),
+  granted_scope: GrantedScopeSchema.optional(),
+  used_scope: UsedScopeSchema.optional(),
+  violations: z.array(ExecutionViolationSchema).optional(),
+  integrity_status: z.enum(['verified', 'compromised', 'unsigned', 'unverified']).optional(),
+  integrity_failures: z.array(z.string()).optional(),
+  integrity_checked_at: z.string().optional(),
 });
 
 // ============================================================================

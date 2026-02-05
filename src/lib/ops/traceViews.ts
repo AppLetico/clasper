@@ -1,5 +1,5 @@
 import { calculateRiskScore } from "../governance/riskScoring.js";
-import { getSkillRegistry } from "../skills/skillRegistry.js";
+import { getSkillRegistry, type SkillState } from "../skills/skillRegistry.js";
 import type { AgentTrace, TraceStep } from "../tracing/trace.js";
 import type { OpsRole } from "../auth/opsAuth.js";
 import { config } from "../core/config.js";
@@ -31,6 +31,7 @@ export interface TraceSummaryView {
   tenant_id: string;
   workspace_id: string;
   agent_role?: string;
+  adapter_id?: string;
   environment: string;
   started_at: string;
   completed_at?: string;
@@ -51,6 +52,10 @@ export interface TraceSummaryView {
   deprecated_skill_used: boolean;
   labels: Record<string, string>;
   annotations: Record<string, string>;
+  integrity: {
+    status: string;
+    failures: string[];
+  };
 }
 
 /**
@@ -106,6 +111,21 @@ export interface TraceDetailView extends TraceSummaryView {
     document_id: LinkedId;
     message_id: LinkedId;
   };
+  granted_scope?: {
+    capabilities: string[];
+    max_steps: number;
+    max_cost: number;
+  };
+  used_scope?: {
+    capabilities: string[];
+    step_count: number;
+    actual_cost: number;
+  };
+  violations?: {
+    type: string;
+    message: string;
+    timestamp: string;
+  }[];
   raw_trace: AgentTrace | null;
 }
 
@@ -172,9 +192,10 @@ export function computeTraceRisk(trace: AgentTrace, skillStates?: Record<string,
   const score = calculateRiskScore({
     toolCount: toolNames.length,
     toolNames,
-    skillState: pickSkillStateForRisk(states),
+    skillState: pickSkillStateForRisk(states) as SkillState | undefined,
     model: trace.model,
-    dataSensitivity: "none"
+    dataSensitivity: "none",
+    requestedCapabilities: trace.granted_scope?.capabilities
   });
 
   return {
@@ -208,6 +229,7 @@ export function buildTraceSummaryView(params: {
     tenant_id: trace.tenantId,
     workspace_id: trace.workspaceId,
     agent_role: trace.agentRole,
+    adapter_id: trace.adapter_id,
     environment: deriveEnvironment(trace),
     started_at: trace.startedAt,
     completed_at: trace.completedAt,
@@ -223,7 +245,11 @@ export function buildTraceSummaryView(params: {
     risk,
     deprecated_skill_used: hasDeprecatedSkill(skillStates),
     labels,
-    annotations: buildAnnotationsMap(annotations)
+    annotations: buildAnnotationsMap(annotations),
+    integrity: {
+      status: trace.integrity_status || "unverified",
+      failures: trace.integrity_failures || []
+    }
   };
 }
 
@@ -363,6 +389,9 @@ export function buildTraceDetailView(params: {
     },
     redaction_info: redactionInfo,
     linked_ids: linkedIds,
+    granted_scope: trace.granted_scope,
+    used_scope: trace.used_scope,
+    violations: trace.violations,
     raw_trace: isAdmin ? trace : null
   };
 }

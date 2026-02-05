@@ -6,6 +6,8 @@
  */
 
 import { getDatabase } from '../core/db.js';
+import { stableStringify, type JsonValue } from '../security/stableJson.js';
+import { sha256Hex, formatSha256 } from '../security/sha256.js';
 
 // ============================================================================
 // Types
@@ -22,6 +24,9 @@ export type AuditEventType =
   | 'tool_call_succeeded'
   | 'tool_call_failed'
   | 'tool_permission_denied'
+  | 'tool_authorization_requested'
+  | 'tool_authorization_granted'
+  | 'tool_authorization_denied'
   | 'skill_published'
   | 'skill_test_run'
   | 'skill_state_changed'
@@ -35,7 +40,14 @@ export type AuditEventType =
   | 'config_change'
   | 'system_startup'
   | 'system_shutdown'
-  | 'ops_override_used';
+  | 'ops_override_used'
+  | 'adapter_trace_ingested'
+  | 'adapter_audit_event'
+  | 'adapter_cost_ingested'
+  | 'adapter_metrics_ingested'
+  | 'adapter_violation_reported'
+  | 'adapter_telemetry_unsigned'
+  | 'adapter_telemetry_signature_invalid';
 
 /**
  * An entry in the audit log
@@ -86,6 +98,21 @@ export interface AuditStats {
   newestEntry?: string;
 }
 
+export interface AuditChainEntry {
+  tenantId: string;
+  seq: number;
+  prevEventHash: string | null;
+  eventHash: string;
+  eventType: AuditEventType;
+  eventData: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AuditChainVerification {
+  ok: boolean;
+  failures: string[];
+}
+
 // ============================================================================
 // Audit Log Class
 // ============================================================================
@@ -105,6 +132,8 @@ export class AuditLog {
     }
   ): number {
     const db = getDatabase();
+    const createdAt = new Date().toISOString();
+    const eventData = data.eventData || {};
 
     const stmt = db.prepare(`
       INSERT INTO audit_log (
@@ -117,11 +146,61 @@ export class AuditLog {
       data.workspaceId || null,
       data.traceId || null,
       eventType,
-      JSON.stringify(data.eventData || {}),
-      new Date().toISOString()
+      JSON.stringify(eventData),
+      createdAt
     );
 
+    this.appendAuditChain({
+      tenantId: data.tenantId,
+      eventType,
+      eventData,
+      createdAt,
+    });
+
     return result.lastInsertRowid as number;
+  }
+
+  private appendAuditChain(params: {
+    tenantId: string;
+    eventType: AuditEventType;
+    eventData: Record<string, unknown>;
+    createdAt: string;
+  }): void {
+    const db = getDatabase();
+    const last = db
+      .prepare(
+        `SELECT seq, event_hash FROM audit_chain WHERE tenant_id = ? ORDER BY seq DESC LIMIT 1`
+      )
+      .get(params.tenantId) as { seq: number; event_hash: string } | undefined;
+
+    const seq = last ? last.seq + 1 : 1;
+    const prevHash = last ? last.event_hash : null;
+
+    const hashPayload = stableStringify({
+      tenant_id: params.tenantId,
+      seq,
+      prev_event_hash: prevHash,
+      event_type: params.eventType,
+      event_data: params.eventData as JsonValue,
+      created_at: params.createdAt,
+    });
+    const eventHash = formatSha256(sha256Hex(hashPayload));
+
+    db.prepare(
+      `
+      INSERT INTO audit_chain (
+        tenant_id, seq, prev_event_hash, event_hash, event_type, event_data, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `
+    ).run(
+      params.tenantId,
+      seq,
+      prevHash,
+      eventHash,
+      params.eventType,
+      JSON.stringify(params.eventData),
+      params.createdAt
+    );
   }
 
   /**
@@ -283,6 +362,59 @@ export class AuditLog {
     };
   }
 
+  getAuditChain(tenantId: string): AuditChainEntry[] {
+    const db = getDatabase();
+    const rows = db
+      .prepare(
+        `
+        SELECT * FROM audit_chain
+        WHERE tenant_id = ?
+        ORDER BY seq ASC
+      `
+      )
+      .all(tenantId) as AuditChainRow[];
+
+    return rows.map((row) => ({
+      tenantId: row.tenant_id,
+      seq: row.seq,
+      prevEventHash: row.prev_event_hash,
+      eventHash: row.event_hash,
+      eventType: row.event_type as AuditEventType,
+      eventData: JSON.parse(row.event_data),
+      createdAt: row.created_at,
+    }));
+  }
+
+  verifyAuditChain(tenantId: string): AuditChainVerification {
+    const entries = this.getAuditChain(tenantId);
+    const failures: string[] = [];
+
+    let prevHash: string | null = null;
+    for (const entry of entries) {
+      if (entry.prevEventHash !== prevHash) {
+        failures.push(`seq_${entry.seq}_prev_hash_mismatch`);
+      }
+
+      const hashPayload = stableStringify({
+        tenant_id: entry.tenantId,
+        seq: entry.seq,
+        prev_event_hash: entry.prevEventHash,
+        event_type: entry.eventType,
+        event_data: entry.eventData as JsonValue,
+        created_at: entry.createdAt,
+      });
+      const expectedHash = formatSha256(sha256Hex(hashPayload));
+
+      if (expectedHash !== entry.eventHash) {
+        failures.push(`seq_${entry.seq}_hash_mismatch`);
+      }
+
+      prevHash = entry.eventHash;
+    }
+
+    return { ok: failures.length === 0, failures };
+  }
+
   /**
    * Purge old entries (for maintenance, use with caution)
    * Note: This is the only way to remove entries, and should only be
@@ -328,6 +460,16 @@ interface AuditRow {
   tenant_id: string;
   workspace_id: string | null;
   trace_id: string | null;
+  event_type: string;
+  event_data: string;
+  created_at: string;
+}
+
+interface AuditChainRow {
+  tenant_id: string;
+  seq: number;
+  prev_event_hash: string | null;
+  event_hash: string;
   event_type: string;
   event_data: string;
   created_at: string;

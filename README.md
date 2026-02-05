@@ -172,9 +172,16 @@ These are first-class capabilities, not afterthoughts:
 
 ### Audit & Compliance
 - Immutable audit logs for all actions
+- Hash-chained audit exports for tamper evidence
 - PII redaction with configurable patterns
 - Retention enforcement with cleanup
 - Audit API with pagination (`GET /ops/api/audit`)
+
+### Trust & Enforcement (v2.1)
+- Signed telemetry envelopes (adapter receipts with signature + payload hash)
+- Hash-chained trace steps for tamper detection
+- Tool authorization tokens (short-lived, single-use)
+- Policy engine with dry-run evaluation
 
 ---
 
@@ -226,6 +233,13 @@ GEMINI_API_KEY=...
 
 # Workspace
 CLASPER_WORKSPACE=./workspace
+
+# Trust & Enforcement (v2.1)
+CLASPER_TELEMETRY_SIGNATURE_MODE=warn   # off | warn | enforce
+CLASPER_TELEMETRY_MAX_SKEW_SECONDS=300
+CLASPER_TOOL_TOKEN_SECRET=your-secret
+CLASPER_TOOL_AUTH_MODE=warn             # off | warn | enforce
+CLASPER_POLICY_PATH=./config/policies.yaml
 
 # Database (optional, defaults to ./clasper.db)
 CLASPER_DB_PATH=./clasper.db
@@ -403,11 +417,15 @@ See:
 | `GET /audit` | Query audit logs |
 | `GET /audit/stats` | Audit statistics |
 | `GET /ops/api/audit` | Ops audit log (OIDC + RBAC) |
+| `GET /ops/api/audit-chain/export` | Export + verify audit hash chain |
 | `GET /budget` | Get tenant budget |
 | `POST /budget` | Set tenant budget |
 | `POST /budget/check` | Check if spend is within budget |
 | `POST /cost/forecast` | Pre-execution cost estimate |
 | `POST /risk/score` | Calculate execution risk score |
+| `POST /api/governance/tool/authorize` | Tool authorization (token mint) |
+| `POST /api/policy/evaluate` | Policy evaluation |
+| `POST /api/policy/dry-run` | Policy evaluation (ops) |
 
 ### Retention
 
@@ -494,17 +512,18 @@ A **Makefile** is provided for common tasks: `make setup`, `make dev`, `make tes
 
 ## Documentation
 
+Full documentation is available at **[clasper.ai/docs](https://clasper.ai/docs/)**.
+
 | Document | Description |
 |----------|-------------|
-| [docs/QUICKSTART.md](docs/QUICKSTART.md) | **Complete getting started guide** |
-| [docs/INTEGRATION.md](docs/INTEGRATION.md) | Backend ↔ Clasper integration patterns |
-| [docs/CONTROL_PLANE_CONTRACT.md](docs/CONTROL_PLANE_CONTRACT.md) | Backend API contract specification |
-| [docs/WORKSPACE.md](docs/WORKSPACE.md) | Workspace specification (SOUL, AGENTS, skills) |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture and design |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Tracing, evals, versioning, ops console |
-| [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | Audit, redaction, budgets, RBAC |
-| [docs/API.md](docs/API.md) | Full API reference |
-| [docs/MANIFESTO.md](docs/MANIFESTO.md) | Our philosophy and principles |
+| [Getting Started](https://clasper.ai/docs/getting-started/) | Complete getting started guide |
+| [Integration Guide](https://clasper.ai/docs/integration/) | Backend ↔ Clasper integration patterns |
+| [Workspace Config](https://clasper.ai/docs/workspace/) | Workspace specification (SOUL, AGENTS, skills) |
+| [Architecture](https://clasper.ai/docs/architecture/) | System architecture and design |
+| [Operations](https://clasper.ai/docs/operations/) | Tracing, evals, versioning, ops console |
+| [Governance](https://clasper.ai/docs/governance/) | Audit, redaction, budgets, RBAC |
+| [API Reference](https://clasper.ai/docs/api-reference/) | Full API reference |
+| [Manifesto](https://clasper.ai/docs/manifesto/) | Our philosophy and principles |
 
 ---
 

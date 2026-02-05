@@ -39,6 +39,10 @@ const loadCostDashboardButton = document.getElementById("loadCostDashboard");
 const costDashboard = document.getElementById("costDashboard");
 const loadRiskDashboardButton = document.getElementById("loadRiskDashboard");
 const riskDashboard = document.getElementById("riskDashboard");
+const loadAdaptersButton = document.getElementById("loadAdapters");
+const adapterList = document.getElementById("adapterList");
+const loadToolAuthButton = document.getElementById("loadToolAuth");
+const toolAuthList = document.getElementById("toolAuthList");
 
 // Override modal elements
 const overrideModal = document.getElementById("overrideModal");
@@ -135,6 +139,26 @@ function applyPermissions(permissions) {
     } else {
       promoOverrideContainer.style.display = "none";
       if (promoOverride) promoOverride.checked = false;
+    }
+  }
+
+  if (loadAdaptersButton) {
+    if (hasPermission("adapter:view")) {
+      loadAdaptersButton.disabled = false;
+      loadAdaptersButton.title = "";
+    } else {
+      loadAdaptersButton.disabled = true;
+      loadAdaptersButton.title = "Requires adapter:view permission";
+    }
+  }
+
+  if (loadToolAuthButton) {
+    if (hasPermission("audit:view")) {
+      loadToolAuthButton.disabled = false;
+      loadToolAuthButton.title = "";
+    } else {
+      loadToolAuthButton.disabled = true;
+      loadToolAuthButton.title = "Requires audit:view permission";
     }
   }
 }
@@ -258,10 +282,11 @@ function renderTraces(traces) {
 
   const rows = traces
     .map((trace) => `
-      <div class="row" data-trace="${trace.id}">
+      <div class="row ${trace.risk.level === "high" || trace.risk.level === "critical" ? "high-risk" : ""}" data-trace="${trace.id}">
         <div class="cell id">${trace.id}</div>
         <div class="cell">${trace.environment}</div>
         <div class="cell">${trace.agent_role || "-"}</div>
+        <div class="cell">${trace.adapter_id || "-"}</div>
         <div class="cell">${trace.status}</div>
         <div class="cell">${trace.risk.level}</div>
         <div class="cell">${formatCost(trace.cost)}</div>
@@ -275,6 +300,7 @@ function renderTraces(traces) {
       <div class="cell id">Trace ID</div>
       <div class="cell">Env</div>
       <div class="cell">Role</div>
+      <div class="cell">Adapter</div>
       <div class="cell">Status</div>
       <div class="cell">Risk</div>
       <div class="cell">Cost</div>
@@ -298,6 +324,9 @@ function renderDetail(trace) {
   // Build redaction info section
   const redactionHtml = buildRedactionInfoHtml(trace.redaction_info);
 
+  const scopeHtml = buildScopeHtml(trace.granted_scope, trace.used_scope, trace.violations);
+  const integrityHtml = buildIntegrityHtml(trace.integrity);
+
   traceDetail.innerHTML = `
     <div class="detail-block">
       <div><strong>Trace:</strong> ${trace.id}</div>
@@ -306,8 +335,11 @@ function renderDetail(trace) {
       <div><strong>Model:</strong> ${trace.model}</div>
       <div><strong>Cost:</strong> ${formatCost(trace.cost)}</div>
       <div><strong>Environment:</strong> ${trace.environment}</div>
+      <div><strong>Adapter:</strong> ${trace.adapter_id || "-"}</div>
     </div>
     ${linkedIdsHtml}
+    ${scopeHtml}
+    ${integrityHtml}
     <div class="detail-block">
       <strong>Governance Signals</strong>
       <div>Redaction applied: ${trace.governance_signals.redaction_applied ? "Yes" : "No"}</div>
@@ -323,6 +355,92 @@ function renderDetail(trace) {
           </div>
         `).join("")}
       </div>
+    </div>
+  `;
+}
+
+function renderAdapters(adapters) {
+  if (!adapterList) return;
+  if (!adapters.length) {
+    adapterList.innerHTML = "No adapters registered.";
+    return;
+  }
+
+  adapterList.innerHTML = adapters
+    .map((adapter) => `
+      <div>
+        <strong>${adapter.display_name}</strong>
+        <div>ID: ${adapter.adapter_id}</div>
+        <div>Version: ${adapter.version}</div>
+        <div>Risk: ${adapter.risk_class}</div>
+        <div>Capabilities: ${(adapter.capabilities || []).join(", ") || "-"}</div>
+        <div>Enabled: ${adapter.enabled ? "Yes" : "No"}</div>
+      </div>
+    `)
+    .join("<hr />");
+}
+
+function renderToolAuthorizations(authorizations) {
+  if (!toolAuthList) return;
+  if (!authorizations.length) {
+    toolAuthList.innerHTML = "No tool authorizations found.";
+    return;
+  }
+
+  toolAuthList.innerHTML = authorizations
+    .map((auth) => `
+      <div>
+        <strong>${auth.tool}</strong>
+        <div>Decision: ${auth.decision}</div>
+        <div>Adapter: ${auth.adapter_id}</div>
+        <div>Execution: ${auth.execution_id}</div>
+        <div>Policy: ${auth.policy_id || "-"}</div>
+        <div>Expires: ${auth.expires_at || "-"}</div>
+      </div>
+    `)
+    .join("<hr />");
+}
+
+function buildScopeHtml(grantedScope, usedScope, violations) {
+  if (!grantedScope && !usedScope && (!violations || !violations.length)) return "";
+
+  const granted = grantedScope
+    ? `<div>Granted: ${grantedScope.capabilities.join(", ") || "-"} · max_steps=${grantedScope.max_steps} · max_cost=${formatCost(grantedScope.max_cost)}</div>`
+    : "";
+  const used = usedScope
+    ? `<div>Used: ${usedScope.capabilities.join(", ") || "-"} · steps=${usedScope.step_count} · cost=${formatCost(usedScope.actual_cost)}</div>`
+    : "";
+  const violationCount = violations ? violations.length : 0;
+  const violationDetails = violationCount > 0
+    ? `
+      <ul class="checklist">
+        ${violations.map((v) => `<li>${v.type} · ${v.timestamp}</li>`).join("")}
+      </ul>
+    `
+    : "";
+  const violationHtml = violationCount > 0 ? `<div>Violations: ${violationCount}</div>${violationDetails}` : "";
+
+  return `
+    <div class="detail-block">
+      <strong>Adapter Scope</strong>
+      ${granted}
+      ${used}
+      ${violationHtml}
+    </div>
+  `;
+}
+
+function buildIntegrityHtml(integrity) {
+  if (!integrity) return "";
+  const failures = integrity.failures && integrity.failures.length
+    ? `<div>Failures: ${integrity.failures.join(", ")}</div>`
+    : "";
+
+  return `
+    <div class="detail-block">
+      <strong>Integrity</strong>
+      <div>Status: ${integrity.status || "unverified"}</div>
+      ${failures}
     </div>
   `;
 }
@@ -737,6 +855,44 @@ async function runDiff() {
   `;
 }
 
+async function loadAdapters() {
+  if (!adapterList) return;
+  adapterList.textContent = "Loading adapters...";
+
+  const tenantId = tenantFilter.value.trim();
+  const query = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+
+  const response = await fetch(`/ops/api/adapters${query}`, {
+    headers: headers()
+  });
+
+  if (!response.ok) {
+    adapterList.textContent = "Failed to load adapters.";
+    return;
+  }
+
+  const data = await response.json();
+  renderAdapters(data.adapters || []);
+}
+
+async function loadToolAuthorizations() {
+  if (!toolAuthList) return;
+  const params = new URLSearchParams();
+  if (tenantFilter.value) params.set("tenant_id", tenantFilter.value);
+
+  const response = await fetch(`/ops/api/tool-authorizations?${params.toString()}`, {
+    headers: headers()
+  });
+
+  if (!response.ok) {
+    toolAuthList.innerHTML = "Failed to load tool authorizations.";
+    return;
+  }
+
+  const data = await response.json();
+  renderToolAuthorizations(data.authorizations || []);
+}
+
 saveTokenButton.addEventListener("click", () => {
   setToken(tokenInput.value.trim());
   fetchMe();
@@ -782,6 +938,18 @@ loadCostDashboardButton.addEventListener("click", () => {
 loadRiskDashboardButton.addEventListener("click", () => {
   loadRiskDashboard();
 });
+
+if (loadAdaptersButton) {
+  loadAdaptersButton.addEventListener("click", () => {
+    loadAdapters();
+  });
+}
+
+if (loadToolAuthButton) {
+  loadToolAuthButton.addEventListener("click", () => {
+    loadToolAuthorizations();
+  });
+}
 
 // Override modal event listeners
 if (overrideModalClose) {

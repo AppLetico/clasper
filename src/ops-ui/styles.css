@@ -87,12 +87,16 @@ body {
 
 .row {
   display: grid;
-  grid-template-columns: 2.2fr 0.6fr 0.8fr 0.7fr 0.7fr 0.8fr 0.8fr;
+  grid-template-columns: 2.2fr 0.6fr 0.8fr 0.8fr 0.7fr 0.7fr 0.8fr 0.8fr;
   gap: 8px;
   padding: 8px;
   background: #0f172a;
   border-radius: 6px;
   cursor: pointer;
+}
+
+.row.high-risk {
+  border: 1px solid #b91c1c;
 }
 
 .row.header {

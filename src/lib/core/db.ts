@@ -77,7 +77,19 @@ export function initDatabase(): void {
       skill_versions JSON,
       redacted_prompt TEXT,
       error TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')),
+      labels JSON DEFAULT '{}',
+      task_id TEXT,
+      document_id TEXT,
+      message_id TEXT,
+      adapter_id TEXT,
+      granted_scope JSON,
+      used_scope JSON,
+      violations JSON,
+      integrity_status TEXT DEFAULT 'unverified',
+      integrity_failures JSON,
+      integrity_checked_at TEXT,
+      risk_level TEXT DEFAULT 'low'
     );
 
     CREATE INDEX IF NOT EXISTS idx_traces_tenant
@@ -104,6 +116,23 @@ export function initDatabase(): void {
 
     CREATE INDEX IF NOT EXISTS idx_audit_type
       ON audit_log(event_type, created_at DESC);
+  `);
+
+  // Audit chain table - hash-linked, append-only
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS audit_chain (
+      tenant_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      prev_event_hash TEXT,
+      event_hash TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data JSON NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (tenant_id, seq)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_chain_tenant
+      ON audit_chain(tenant_id, seq DESC);
   `);
 
   // Skill registry table - versioned skills
@@ -137,6 +166,79 @@ export function initDatabase(): void {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+  `);
+
+  // Adapter ingest deduplication table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ingest_dedup (
+      execution_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (execution_id, event_type)
+    );
+  `);
+
+  // Adapter registry table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS adapter_registry (
+      tenant_id TEXT NOT NULL,
+      adapter_id TEXT NOT NULL,
+      version TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      risk_class TEXT NOT NULL,
+      capabilities JSON NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      telemetry_key_alg TEXT,
+      telemetry_public_jwk JSON,
+      telemetry_key_id TEXT,
+      telemetry_key_created_at TEXT,
+      telemetry_key_revoked_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (tenant_id, adapter_id, version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_adapter_registry_tenant
+      ON adapter_registry(tenant_id, adapter_id, updated_at DESC);
+  `);
+
+  // Tool authorization tokens (single-use)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tool_tokens (
+      jti TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      adapter_id TEXT NOT NULL,
+      execution_id TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      scope_hash TEXT NOT NULL,
+      issued_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tool_tokens_tenant
+      ON tool_tokens(tenant_id, created_at DESC);
+  `);
+
+  // Tool authorization decisions
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tool_authorizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT NOT NULL,
+      adapter_id TEXT NOT NULL,
+      execution_id TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      policy_id TEXT,
+      reason TEXT,
+      granted_scope JSON,
+      expires_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tool_authorizations_tenant
+      ON tool_authorizations(tenant_id, created_at DESC);
   `);
 
   // Workspace versions table - for workspace versioning
@@ -245,6 +347,9 @@ export function initDatabase(): void {
   runSkillStateColumnMigration();
   runTraceLinkingMigration();
   runV121IndexMigration();
+  runAdapterTraceColumnsMigration();
+  runAdapterKeyColumnsMigration();
+  runTraceIntegrityColumnsMigration();
 }
 
 /**
@@ -381,6 +486,94 @@ function runTraceLinkingMigration(): void {
   }
   if (!hasMessageId) {
     database.exec(`CREATE INDEX IF NOT EXISTS idx_traces_message ON traces(message_id);`);
+  }
+}
+
+/**
+ * Migration to add adapter governance columns to traces table
+ */
+function runAdapterTraceColumnsMigration(): void {
+  const database = getDatabase();
+  const columns = database
+    .prepare("PRAGMA table_info(traces)")
+    .all() as { name: string }[];
+
+  const hasAdapterId = columns.some((c) => c.name === 'adapter_id');
+  const hasGrantedScope = columns.some((c) => c.name === 'granted_scope');
+  const hasUsedScope = columns.some((c) => c.name === 'used_scope');
+  const hasViolations = columns.some((c) => c.name === 'violations');
+
+  if (!hasAdapterId) {
+    database.exec(`ALTER TABLE traces ADD COLUMN adapter_id TEXT;`);
+  }
+  if (!hasGrantedScope) {
+    database.exec(`ALTER TABLE traces ADD COLUMN granted_scope JSON;`);
+  }
+  if (!hasUsedScope) {
+    database.exec(`ALTER TABLE traces ADD COLUMN used_scope JSON;`);
+  }
+  if (!hasViolations) {
+    database.exec(`ALTER TABLE traces ADD COLUMN violations JSON;`);
+  }
+
+  if (!hasAdapterId) {
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_traces_adapter ON traces(adapter_id);`);
+  }
+}
+
+/**
+ * Migration to add adapter telemetry key columns.
+ */
+function runAdapterKeyColumnsMigration(): void {
+  const database = getDatabase();
+  const columns = database
+    .prepare("PRAGMA table_info(adapter_registry)")
+    .all() as { name: string }[];
+
+  const hasKeyAlg = columns.some((c) => c.name === 'telemetry_key_alg');
+  const hasPublicJwk = columns.some((c) => c.name === 'telemetry_public_jwk');
+  const hasKeyId = columns.some((c) => c.name === 'telemetry_key_id');
+  const hasKeyCreatedAt = columns.some((c) => c.name === 'telemetry_key_created_at');
+  const hasKeyRevokedAt = columns.some((c) => c.name === 'telemetry_key_revoked_at');
+
+  if (!hasKeyAlg) {
+    database.exec(`ALTER TABLE adapter_registry ADD COLUMN telemetry_key_alg TEXT;`);
+  }
+  if (!hasPublicJwk) {
+    database.exec(`ALTER TABLE adapter_registry ADD COLUMN telemetry_public_jwk JSON;`);
+  }
+  if (!hasKeyId) {
+    database.exec(`ALTER TABLE adapter_registry ADD COLUMN telemetry_key_id TEXT;`);
+  }
+  if (!hasKeyCreatedAt) {
+    database.exec(`ALTER TABLE adapter_registry ADD COLUMN telemetry_key_created_at TEXT;`);
+  }
+  if (!hasKeyRevokedAt) {
+    database.exec(`ALTER TABLE adapter_registry ADD COLUMN telemetry_key_revoked_at TEXT;`);
+  }
+}
+
+/**
+ * Migration to add trace integrity columns.
+ */
+function runTraceIntegrityColumnsMigration(): void {
+  const database = getDatabase();
+  const columns = database
+    .prepare("PRAGMA table_info(traces)")
+    .all() as { name: string }[];
+
+  const hasIntegrityStatus = columns.some((c) => c.name === 'integrity_status');
+  const hasIntegrityFailures = columns.some((c) => c.name === 'integrity_failures');
+  const hasIntegrityCheckedAt = columns.some((c) => c.name === 'integrity_checked_at');
+
+  if (!hasIntegrityStatus) {
+    database.exec(`ALTER TABLE traces ADD COLUMN integrity_status TEXT DEFAULT 'unverified';`);
+  }
+  if (!hasIntegrityFailures) {
+    database.exec(`ALTER TABLE traces ADD COLUMN integrity_failures JSON;`);
+  }
+  if (!hasIntegrityCheckedAt) {
+    database.exec(`ALTER TABLE traces ADD COLUMN integrity_checked_at TEXT;`);
   }
 }
 

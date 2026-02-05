@@ -104,7 +104,7 @@ export class VectorStore {
   }> {
     ensureTable();
     const db = getDatabase();
-    return db.prepare(`
+    const rows = db.prepare(`
       SELECT chunk_id, source_type, source_name, embedding, content_hash
       FROM ${TABLE_NAME}
     `).all() as Array<{
@@ -114,6 +114,13 @@ export class VectorStore {
       embedding: Buffer;
       content_hash: string;
     }>;
+    return rows.map((r) => ({
+      chunkId: r.chunk_id,
+      sourceType: r.source_type,
+      sourceName: r.source_name,
+      embedding: r.embedding,
+      contentHash: r.content_hash,
+    }));
   }
 
   clear(): void {
@@ -134,11 +141,11 @@ export class VectorStore {
     if (queryEmbedding.length === 0) return [];
     const rows = this.getEmbeddings();
     const scored: VectorMatch[] = rows.map((row) => ({
-      chunkId: row.chunk_id,
-      sourceType: row.source_type,
-      sourceName: row.source_name,
+      chunkId: row.chunkId,
+      sourceType: row.sourceType,
+      sourceName: row.sourceName,
       score: cosineSimilarity(fromBuffer(row.embedding), queryEmbedding),
-      contentHash: row.content_hash
+      contentHash: row.contentHash
     }));
 
     return scored

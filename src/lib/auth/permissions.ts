@@ -33,6 +33,9 @@ export type Permission =
   | "dashboard:view"
   // Audit
   | "audit:view"
+  // Adapter registry
+  | "adapter:view"
+  | "adapter:manage_keys"
   // Override (dangerous actions)
   | "override:use";
 
@@ -68,6 +71,10 @@ export const PERMISSIONS: Record<Permission, OpsRole[]> = {
 
   // Audit
   "audit:view": ["operator", "release_manager", "admin"],
+
+  // Adapter registry
+  "adapter:view": ["operator", "release_manager", "admin"],
+  "adapter:manage_keys": ["release_manager", "admin"],
 
   // Override (dangerous actions)
   "override:use": ["release_manager", "admin"],

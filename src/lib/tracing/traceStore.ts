@@ -7,6 +7,7 @@
 
 import { getDatabase } from '../core/db.js';
 import type { AgentTrace, TraceStep, ToolCallTrace } from './trace.js';
+import type { TraceIntegrityStatus } from './traceIntegrity.js';
 
 // ============================================================================
 // Types
@@ -56,7 +57,8 @@ export class TraceStore {
         input_message, input_message_count,
         output_message, input_tokens, output_tokens, total_cost,
         steps, tool_calls, skill_versions, redacted_prompt, error, labels,
-        task_id, document_id, message_id
+        task_id, document_id, message_id, adapter_id, granted_scope, used_scope, violations,
+        integrity_status, integrity_failures, integrity_checked_at, risk_level
       ) VALUES (
         ?, ?, ?, ?,
         ?, ?, ?,
@@ -64,7 +66,7 @@ export class TraceStore {
         ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?,
-        ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -93,7 +95,15 @@ export class TraceStore {
       JSON.stringify(trace.labels || {}),
       trace.taskId || null,
       trace.documentId || null,
-      trace.messageId || null
+      trace.messageId || null,
+      trace.adapter_id || null,
+      JSON.stringify(trace.granted_scope || null),
+      JSON.stringify(trace.used_scope || null),
+      JSON.stringify(trace.violations || null),
+      trace.integrity_status || null,
+      JSON.stringify(trace.integrity_failures || null),
+      trace.integrity_checked_at || null,
+      (trace as { risk_level?: string }).risk_level || 'low'
     );
   }
 
@@ -396,6 +406,12 @@ export class TraceStore {
       row.skill_versions || '{}'
     );
     const labels: Record<string, string> = JSON.parse(row.labels || '{}');
+    const grantedScope = row.granted_scope ? JSON.parse(row.granted_scope) : undefined;
+    const usedScope = row.used_scope ? JSON.parse(row.used_scope) : undefined;
+    const violations = row.violations ? JSON.parse(row.violations) : undefined;
+    const integrityFailures = row.integrity_failures
+      ? JSON.parse(row.integrity_failures)
+      : undefined;
 
     return {
       id: row.id,
@@ -431,6 +447,13 @@ export class TraceStore {
       taskId: row.task_id || undefined,
       documentId: row.document_id || undefined,
       messageId: row.message_id || undefined,
+      adapter_id: row.adapter_id || undefined,
+      granted_scope: grantedScope,
+      used_scope: usedScope,
+      violations,
+      integrity_status: (row.integrity_status as TraceIntegrityStatus | undefined) || undefined,
+      integrity_failures: integrityFailures,
+      integrity_checked_at: row.integrity_checked_at || undefined,
     };
   }
 
@@ -510,6 +533,14 @@ interface TraceRow {
   task_id: string | null;
   document_id: string | null;
   message_id: string | null;
+  adapter_id: string | null;
+  granted_scope: string | null;
+  used_scope: string | null;
+  violations: string | null;
+  integrity_status: string | null;
+  integrity_failures: string | null;
+  integrity_checked_at: string | null;
+  risk_level: string | null;
 }
 
 // ============================================================================

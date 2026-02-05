@@ -26,6 +26,7 @@ export { llmComplete, llmStream, llmTask, llmCompact, ProviderContractError, par
 export * from './workspace/index.js';
 export * from './evals/index.js';
 export { listTasks, createTask, postMessage, postDocument, fireWebhook, getUsageTracker } from './integrations/index.js';
+export * from './adapters/index.js';
 
 // Security utilities (inspired by OpenClaw 2026.2.1)
 export {

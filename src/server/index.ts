@@ -25,7 +25,7 @@ import { z } from "zod";
 import { v7 as uuidv7 } from "uuid";
 // Core
 import { config, requireEnv } from "../lib/core/config.js";
-import { initDatabase, getDatabaseStats } from "../lib/core/db.js";
+import { initDatabase, getDatabaseStats, getDatabase } from "../lib/core/db.js";
 // Auth
 import { parseSessionKey, buildAgentToken } from "../lib/auth/agentAuth.js";
 import {
@@ -39,7 +39,7 @@ import {
   PermissionError
 } from "../lib/auth/opsAuth.js";
 // Providers
-import { generateAgentReply, compactHistory, runLLMTask, type AgentReplyResult } from "../lib/providers/openaiClient.js";
+import { compactHistory, runLLMTask } from "../lib/providers/openaiClient.js";
 import { streamAgentReply } from "../lib/providers/streaming.js";
 // Integrations
 import { listTasks, createTask, postMessage, postDocument } from "../lib/integrations/missionControl.js";
@@ -68,10 +68,25 @@ import { runPromotionChecks } from "../lib/ops/promotionChecks.js";
 import { getSkillEnvironmentUsage, getSkillUsageStats, getPermissionDiff } from "../lib/ops/skillOps.js";
 import { getCostDashboard, getRiskDashboard } from "../lib/ops/dashboards.js";
 // Governance
-import { getAuditLog, logOverrideUsed } from "../lib/governance/auditLog.js";
+import { getAuditLog, logOverrideUsed, auditLog } from "../lib/governance/auditLog.js";
 import { OVERRIDE_REASON_CODES, OverrideSchema, type OverrideRequest } from "../lib/ops/overrides.js";
 import { getBudgetManager } from "../lib/governance/budgetManager.js";
 import { calculateRiskScore, type RiskScoringInput } from "../lib/governance/riskScoring.js";
+import { evaluateExecutionDecision } from "../lib/governance/executionDecision.js";
+import { evaluatePolicy } from "../lib/governance/policyEngine.js";
+import { issueToolToken, ToolTokenError } from "../lib/governance/toolTokens.js";
+import { ingestAudit, ingestCost, ingestMetrics, ingestTrace, ingestViolation } from "../lib/adapters/ingest.js";
+import { requireAdapterContextFromHeaders, AdapterAuthError, type AdapterAuthContext } from "../lib/adapters/auth.js";
+import { getAdapterRegistry } from "../lib/adapters/registry.js";
+import { AdapterRegistrationSchema } from "../lib/adapters/types.js";
+import {
+  isSignedTelemetryEnvelope,
+  verifySignedEnvelope,
+  SignedEnvelopeError,
+  type SignedTelemetryEnvelope,
+} from "../lib/adapters/signedEnvelope.js";
+import { runBuiltinRuntime } from "../lib/adapters/builtinRuntime.js";
+import type { JsonValue } from "../lib/security/stableJson.js";
 // Evals
 import { getEvalRunner, type EvalDataset, type EvalOptions } from "../lib/evals/evals.js";
 
@@ -299,10 +314,11 @@ export function buildApp() {
       );
 
       if (query.label_key) {
+        const key = query.label_key;
         summaries = summaries.filter((trace) =>
           query.label_value
-            ? trace.labels[query.label_key] === query.label_value
-            : trace.labels[query.label_key] !== undefined
+            ? trace.labels?.[key] === query.label_value
+            : trace.labels?.[key] !== undefined
         );
       }
       if (query.status) {
@@ -938,6 +954,367 @@ export function buildApp() {
     }
   });
 
+  app.get("/ops/api/audit-chain/export", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "audit:view");
+
+      const ExportSchema = z.object({
+        tenant_id: z.string().optional(),
+      });
+
+      const parsed = ExportSchema.safeParse(request.query);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+
+      const tenantId = parsed.data.tenant_id || context.tenantId;
+      if (!canAccessTenant(context, tenantId)) {
+        return reply.status(403).send({ error: "Tenant access denied" });
+      }
+
+      const auditLog = getAuditLog();
+      const chain = auditLog.getAuditChain(tenantId);
+      const verification = auditLog.verifyAuditChain(tenantId);
+
+      return reply.send({
+        tenant_id: tenantId,
+        verification,
+        chain,
+      });
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      return reply.status(500).send({ error: "Failed to export audit chain" });
+    }
+  });
+
+  app.get("/ops/api/adapters", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "adapter:view");
+
+      const AdapterListQuerySchema = z.object({
+        tenant_id: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        offset: z.coerce.number().int().min(0).optional()
+      });
+
+      const parsed = AdapterListQuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+
+      const tenantId = parsed.data.tenant_id || context.tenantId;
+      if (!canAccessTenant(context, tenantId)) {
+        return reply.status(403).send({ error: "Tenant access denied" });
+      }
+
+      const registry = getAdapterRegistry();
+      const adapters = registry.list(tenantId, {
+        limit: parsed.data.limit,
+        offset: parsed.data.offset
+      });
+
+      return reply.send({
+        adapters,
+        total: adapters.length,
+        limit: parsed.data.limit || 100,
+        offset: parsed.data.offset || 0
+      });
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      return reply.status(500).send({ error: "Failed to load adapters" });
+    }
+  });
+
+  app.post("/ops/api/adapters/telemetry-key", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "adapter:manage_keys");
+
+      const TelemetryKeySchema = z.object({
+        tenant_id: z.string().optional(),
+        adapter_id: z.string(),
+        version: z.string().optional(),
+        key_alg: z.string(),
+        public_jwk: z.record(z.unknown()),
+        key_id: z.string().optional(),
+      });
+
+      const parsed = TelemetryKeySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+
+      const tenantId = parsed.data.tenant_id || context.tenantId;
+      if (!canAccessTenant(context, tenantId)) {
+        return reply.status(403).send({ error: "Tenant access denied" });
+      }
+
+      const registry = getAdapterRegistry();
+      const record = registry.setTelemetryKey({
+        tenantId,
+        adapterId: parsed.data.adapter_id,
+        version: parsed.data.version,
+        keyAlg: parsed.data.key_alg,
+        publicJwk: parsed.data.public_jwk,
+        keyId: parsed.data.key_id,
+      });
+
+      if (!record) {
+        return reply.status(404).send({ error: "Adapter not found" });
+      }
+
+      auditLog("config_change", {
+        tenantId,
+        workspaceId: context.workspaceId,
+        eventData: {
+          action: "adapter_telemetry_key_set",
+          adapter_id: parsed.data.adapter_id,
+          version: parsed.data.version,
+          key_alg: parsed.data.key_alg,
+          key_id: parsed.data.key_id,
+          actor: context.userId,
+        },
+      });
+
+      return reply.send({ adapter: record });
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      return reply.status(500).send({ error: "Failed to set adapter telemetry key" });
+    }
+  });
+
+  app.post("/ops/api/adapters/telemetry-key/revoke", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "adapter:manage_keys");
+
+      const RevokeSchema = z.object({
+        tenant_id: z.string().optional(),
+        adapter_id: z.string(),
+        version: z.string().optional(),
+        reason: z.string().optional(),
+      });
+
+      const parsed = RevokeSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+
+      const tenantId = parsed.data.tenant_id || context.tenantId;
+      if (!canAccessTenant(context, tenantId)) {
+        return reply.status(403).send({ error: "Tenant access denied" });
+      }
+
+      const registry = getAdapterRegistry();
+      const record = registry.revokeTelemetryKey({
+        tenantId,
+        adapterId: parsed.data.adapter_id,
+        version: parsed.data.version,
+        reason: parsed.data.reason,
+      });
+
+      if (!record) {
+        return reply.status(404).send({ error: "Adapter not found" });
+      }
+
+      auditLog("config_change", {
+        tenantId,
+        workspaceId: context.workspaceId,
+        eventData: {
+          action: "adapter_telemetry_key_revoked",
+          adapter_id: parsed.data.adapter_id,
+          version: parsed.data.version,
+          reason: parsed.data.reason,
+          actor: context.userId,
+        },
+      });
+
+      return reply.send({ adapter: record });
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      return reply.status(500).send({ error: "Failed to revoke adapter telemetry key" });
+    }
+  });
+
+  app.get("/ops/api/tool-authorizations", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "audit:view");
+
+      const QuerySchema = z.object({
+        tenant_id: z.string().optional(),
+        adapter_id: z.string().optional(),
+        execution_id: z.string().optional(),
+        tool: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        offset: z.coerce.number().int().min(0).optional(),
+      });
+
+      const parsed = QuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+
+      const tenantId = parsed.data.tenant_id || context.tenantId;
+      if (!canAccessTenant(context, tenantId)) {
+        return reply.status(403).send({ error: "Tenant access denied" });
+      }
+
+      const limit = parsed.data.limit || 100;
+      const offset = parsed.data.offset || 0;
+      const conditions: string[] = ["tenant_id = ?"];
+      const params: unknown[] = [tenantId];
+
+      if (parsed.data.adapter_id) {
+        conditions.push("adapter_id = ?");
+        params.push(parsed.data.adapter_id);
+      }
+      if (parsed.data.execution_id) {
+        conditions.push("execution_id = ?");
+        params.push(parsed.data.execution_id);
+      }
+      if (parsed.data.tool) {
+        conditions.push("tool = ?");
+        params.push(parsed.data.tool);
+      }
+
+      const whereClause = conditions.join(" AND ");
+      const db = getDatabase();
+      const rows = db
+        .prepare(
+          `
+          SELECT * FROM tool_authorizations
+          WHERE ${whereClause}
+          ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
+        `
+        )
+        .all(...params, limit, offset) as Array<Record<string, unknown>>;
+
+      return reply.send({
+        authorizations: rows,
+        total: rows.length,
+        limit,
+        offset,
+      });
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      return reply.status(500).send({ error: "Failed to load tool authorizations" });
+    }
+  });
+
+  app.get("/ops/api/tool-authorizations/:id", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "audit:view");
+
+      const id = (request.params as { id?: string }).id;
+      if (!id) {
+        return reply.status(400).send({ error: "Missing id" });
+      }
+
+      const db = getDatabase();
+      const row = db
+        .prepare("SELECT * FROM tool_authorizations WHERE id = ?")
+        .get(id) as Record<string, unknown> | undefined;
+
+      if (!row) {
+        return reply.status(404).send({ error: "Not found" });
+      }
+
+      return reply.send({ authorization: row });
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      return reply.status(500).send({ error: "Failed to load tool authorization" });
+    }
+  });
+
   /**
    * Compact history endpoint.
    * Summarizes conversation history to reduce token usage.
@@ -996,6 +1373,125 @@ export function buildApp() {
     max_tokens: z.number().int().positive().optional()
   });
 
+  const ExecutionDecisionRequestSchema = z.object({
+    execution_id: z.string().optional(),
+    tenant_id: z.string(),
+    workspace_id: z.string(),
+    adapter_id: z.string(),
+    adapter_risk_class: z.enum(['low', 'medium', 'high', 'critical']).optional(),
+    requested_capabilities: z.array(z.string()),
+    max_steps: z.number().int().positive().optional(),
+    max_cost: z.number().optional(),
+    estimated_cost: z.number().optional(),
+    tool_count: z.number().int().nonnegative(),
+    tool_names: z.array(z.string()).optional(),
+    skill_state: z.enum(['draft', 'tested', 'approved', 'active', 'deprecated']).optional(),
+    temperature: z.number().optional(),
+    data_sensitivity: z.enum(['none', 'low', 'medium', 'high', 'pii']).optional(),
+    skill_tested: z.boolean().optional(),
+    skill_pinned: z.boolean().optional(),
+    custom_flags: z.array(z.string()).optional(),
+    rbac_allowed: z.boolean().optional(),
+    override: z
+      .object({
+        actor: z.string(),
+        role: z.string(),
+        action: z.string().optional(),
+        request: OverrideSchema,
+      })
+      .optional(),
+  });
+
+  const enforceAdapterEnvelope = (context: AdapterAuthContext, payload: unknown) => {
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Invalid adapter payload");
+    }
+    const record = payload as Record<string, unknown>;
+    if (
+      record.adapter_id !== context.adapterId ||
+      record.tenant_id !== context.tenantId ||
+      record.workspace_id !== context.workspaceId
+    ) {
+      throw new Error("Adapter scope mismatch");
+    }
+  };
+
+  const telemetrySignatureMode = config.telemetrySignatureMode as
+    | "off"
+    | "warn"
+    | "enforce";
+  const telemetryMaxSkewSeconds = config.telemetryMaxSkewSeconds;
+
+  const resolveTelemetryPayload = (
+    context: AdapterAuthContext,
+    payload: unknown,
+    expectedType: SignedTelemetryEnvelope["payload_type"]
+  ): { payload: unknown; signed: boolean } => {
+    if (isSignedTelemetryEnvelope(payload)) {
+      if (payload.payload_type !== expectedType) {
+        throw new Error(`Signed payload type mismatch: expected ${expectedType}`);
+      }
+
+      const registry = getAdapterRegistry();
+      const key = registry.getActiveTelemetryKey({
+        tenantId: context.tenantId,
+        adapterId: payload.adapter_id,
+        version: payload.adapter_version,
+      });
+
+      try {
+        verifySignedEnvelope({
+          envelope: payload,
+          key: key
+            ? {
+                alg: key.keyAlg === "ed25519" ? "ed25519" : "ES256",
+                publicJwk: key.publicJwk,
+                keyId: key.keyId,
+                revokedAt: null,
+              }
+            : null,
+          maxSkewSeconds: telemetryMaxSkewSeconds,
+        });
+      } catch (error) {
+        if (error instanceof SignedEnvelopeError) {
+          auditLog("adapter_telemetry_signature_invalid", {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            eventData: {
+              adapter_id: context.adapterId,
+              code: error.code,
+              message: error.message,
+              payload_type: payload.payload_type,
+            },
+          });
+        }
+        throw error;
+      }
+
+      enforceAdapterEnvelope(context, payload.payload);
+      return { payload: payload.payload, signed: true };
+    }
+
+    if (telemetrySignatureMode === "enforce") {
+      throw new SignedEnvelopeError("Missing signed telemetry envelope", "missing_key");
+    }
+
+    enforceAdapterEnvelope(context, payload);
+
+    if (telemetrySignatureMode === "warn") {
+      auditLog("adapter_telemetry_unsigned", {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        eventData: {
+          adapter_id: context.adapterId,
+          expected_type: expectedType,
+        },
+      });
+    }
+
+    return { payload, signed: false };
+  };
+
   app.post("/llm-task", async (request, reply) => {
     const daemonKey = config.daemonKey;
     const headerKey = request.headers["x-agent-daemon-key"];
@@ -1019,6 +1515,387 @@ export function buildApp() {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "LLM task failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  /**
+   * Pre-execution decision endpoint for adapters.
+   */
+  app.post("/api/execution/request", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const parsed = ExecutionDecisionRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+
+      if (
+        parsed.data.adapter_id !== adapterContext.adapterId ||
+        parsed.data.tenant_id !== adapterContext.tenantId ||
+        parsed.data.workspace_id !== adapterContext.workspaceId
+      ) {
+        return reply.status(403).send({ error: "Adapter scope mismatch" });
+      }
+
+      const unauthorized = parsed.data.requested_capabilities.filter(
+        (cap) => !adapterContext.allowedCapabilities.includes(cap)
+      );
+      if (unauthorized.length > 0) {
+        return reply.status(403).send({
+          error: "Capability not allowed",
+          capabilities: unauthorized,
+        });
+      }
+
+      const decision = evaluateExecutionDecision(parsed.data);
+      return reply.send(decision);
+    } catch (error) {
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Execution decision failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  /**
+   * Tool authorization endpoint for adapters.
+   */
+  const ToolAuthorizeSchema = z.object({
+    execution_id: z.string(),
+    adapter_id: z.string(),
+    tool: z.string(),
+    requested_scope: z.record(z.unknown()).optional(),
+    environment: z.string().optional(),
+    skill_state: z.string().optional(),
+    adapter_risk_class: z.string().optional(),
+  });
+
+  app.post("/api/governance/tool/authorize", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const parsed = ToolAuthorizeSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+
+      if (parsed.data.adapter_id !== adapterContext.adapterId) {
+        return reply.status(403).send({ error: "Adapter scope mismatch" });
+      }
+
+      auditLog("tool_authorization_requested", {
+        tenantId: adapterContext.tenantId,
+        workspaceId: adapterContext.workspaceId,
+        eventData: {
+          adapter_id: adapterContext.adapterId,
+          execution_id: parsed.data.execution_id,
+          tool: parsed.data.tool,
+        },
+      });
+
+      const policy = evaluatePolicy({
+        environment: parsed.data.environment,
+        tool: parsed.data.tool,
+        adapter_risk_class: parsed.data.adapter_risk_class,
+        skill_state: parsed.data.skill_state,
+        tenant_id: adapterContext.tenantId,
+      });
+
+      const db = getDatabase();
+      if (policy.decision !== "allow") {
+        db.prepare(
+          `
+          INSERT INTO tool_authorizations (
+            tenant_id, adapter_id, execution_id, tool, decision, policy_id, reason
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `
+        ).run(
+          adapterContext.tenantId,
+          adapterContext.adapterId,
+          parsed.data.execution_id,
+          parsed.data.tool,
+          policy.decision,
+          policy.policy_id || null,
+          policy.decision === "require_approval" ? "requires_approval" : "policy_denied"
+        );
+
+        auditLog("tool_authorization_denied", {
+          tenantId: adapterContext.tenantId,
+          workspaceId: adapterContext.workspaceId,
+          eventData: {
+            adapter_id: adapterContext.adapterId,
+            execution_id: parsed.data.execution_id,
+            tool: parsed.data.tool,
+            policy_id: policy.policy_id,
+            decision: policy.decision,
+          },
+        });
+
+        return reply.send({
+          decision: "deny",
+          reason: policy.decision === "require_approval" ? "approval_required" : "policy_denied",
+          policy_id: policy.policy_id,
+        });
+      }
+
+      const issued = await issueToolToken({
+        tenant_id: adapterContext.tenantId,
+        workspace_id: adapterContext.workspaceId,
+        adapter_id: adapterContext.adapterId,
+        execution_id: parsed.data.execution_id,
+        tool: parsed.data.tool,
+        scope: (parsed.data.requested_scope || {}) as JsonValue,
+      });
+
+      db.prepare(
+        `
+        INSERT INTO tool_authorizations (
+          tenant_id, adapter_id, execution_id, tool, decision, policy_id, granted_scope, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      ).run(
+        adapterContext.tenantId,
+        adapterContext.adapterId,
+        parsed.data.execution_id,
+        parsed.data.tool,
+        "allow",
+        policy.policy_id || null,
+        JSON.stringify(parsed.data.requested_scope || {}),
+        issued.expires_at
+      );
+
+      auditLog("tool_authorization_granted", {
+        tenantId: adapterContext.tenantId,
+        workspaceId: adapterContext.workspaceId,
+        eventData: {
+          adapter_id: adapterContext.adapterId,
+          execution_id: parsed.data.execution_id,
+          tool: parsed.data.tool,
+          policy_id: policy.policy_id,
+          token_id: issued.jti,
+          expires_at: issued.expires_at,
+        },
+      });
+
+      return reply.send({
+        decision: "allow",
+        tool_token: issued.token,
+        expires_at: issued.expires_at,
+        granted_scope: parsed.data.requested_scope || {},
+      });
+    } catch (error) {
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      if (error instanceof ToolTokenError) {
+        return reply.status(500).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Tool authorization failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  /**
+   * Policy evaluation endpoints.
+   */
+  const PolicyEvalSchema = z.object({
+    environment: z.string().optional(),
+    tool: z.string().optional(),
+    adapter_risk_class: z.string().optional(),
+    skill_state: z.string().optional(),
+    tenant_id: z.string().optional(),
+  });
+
+  app.post("/api/policy/evaluate", async (request, reply) => {
+    try {
+      await requireAdapterContextFromHeaders(request.headers);
+      const parsed = PolicyEvalSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+      const result = evaluatePolicy(parsed.data);
+      return reply.send(result);
+    } catch (error) {
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Policy evaluation failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/policy/dry-run", async (request, reply) => {
+    try {
+      const context = await requireOpsContextFromHeaders(request.headers);
+      requirePermission(context, "audit:view");
+      const parsed = PolicyEvalSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+      const result = evaluatePolicy(parsed.data);
+      return reply.send(result);
+    } catch (error) {
+      if (error instanceof PermissionError) {
+        return reply.status(403).send({
+          error: error.message,
+          code: "permission_denied",
+          permission: error.permission,
+          required_roles: error.requiredRoles
+        });
+      }
+      if (error instanceof OpsAuthError) {
+        const status =
+          error.code === "missing_token" ? 401 :
+          error.code === "config_error" ? 500 :
+          403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Policy dry-run failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  /**
+   * Adapter registration endpoint.
+   */
+  app.post("/adapters/register", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const parsed = AdapterRegistrationSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ error: "Invalid payload", details: parsed.error.flatten() });
+      }
+
+      if (parsed.data.adapter_id !== adapterContext.adapterId) {
+        return reply.status(403).send({ error: "Adapter scope mismatch" });
+      }
+
+      const registry = getAdapterRegistry();
+      const record = registry.register(adapterContext.tenantId, parsed.data);
+      return reply.send(record);
+    } catch (error) {
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Adapter registration failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  /**
+   * Telemetry ingest endpoints for adapters.
+   */
+  app.post("/api/ingest/trace", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const resolved = resolveTelemetryPayload(adapterContext, request.body, "trace");
+      const result = ingestTrace(resolved.payload);
+      return reply.send({ status: result.status });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: "Invalid payload", details: error.flatten() });
+      }
+      if (error instanceof SignedEnvelopeError) {
+        return reply.status(400).send({ error: error.message, code: error.code });
+      }
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Trace ingest failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/ingest/audit", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const resolved = resolveTelemetryPayload(adapterContext, request.body, "audit");
+      const result = ingestAudit(resolved.payload);
+      return reply.send({ status: result.status });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: "Invalid payload", details: error.flatten() });
+      }
+      if (error instanceof SignedEnvelopeError) {
+        return reply.status(400).send({ error: error.message, code: error.code });
+      }
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Audit ingest failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/ingest/cost", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const resolved = resolveTelemetryPayload(adapterContext, request.body, "cost");
+      const result = ingestCost(resolved.payload);
+      return reply.send({ status: result.status });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: "Invalid payload", details: error.flatten() });
+      }
+      if (error instanceof SignedEnvelopeError) {
+        return reply.status(400).send({ error: error.message, code: error.code });
+      }
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Cost ingest failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/ingest/metrics", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const resolved = resolveTelemetryPayload(adapterContext, request.body, "metrics");
+      const result = ingestMetrics(resolved.payload);
+      return reply.send({ status: result.status });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: "Invalid payload", details: error.flatten() });
+      }
+      if (error instanceof SignedEnvelopeError) {
+        return reply.status(400).send({ error: error.message, code: error.code });
+      }
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Metrics ingest failed";
+      return reply.status(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/ingest/violations", async (request, reply) => {
+    try {
+      const adapterContext = await requireAdapterContextFromHeaders(request.headers);
+      const resolved = resolveTelemetryPayload(adapterContext, request.body, "violations");
+      const result = ingestViolation(resolved.payload);
+      return reply.send({ status: result.status });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: "Invalid payload", details: error.flatten() });
+      }
+      if (error instanceof SignedEnvelopeError) {
+        return reply.status(400).send({ error: error.message, code: error.code });
+      }
+      if (error instanceof AdapterAuthError) {
+        const status = error.code === "missing_token" ? 401 : error.code === "config_error" ? 500 : 403;
+        return reply.status(status).send({ error: error.message, code: error.code });
+      }
+      const message = error instanceof Error ? error.message : "Violation ingest failed";
       return reply.status(500).send({ error: message });
     }
   });
@@ -3079,17 +3956,19 @@ export function buildApp() {
       return;
     }
 
-    // Generate agent reply with optional conversation history
-    const result: AgentReplyResult = await generateAgentReply({
-      role,
-      userMessage: payload.message,
+    // Execute through built-in runtime adapter
+    const runtimeResult = await runBuiltinRuntime({
+      tenant_id: payload.user_id,
+      workspace_id: payload.metadata?.workspace_id || "default",
+      user_message: payload.message,
       messages: payload.messages,
-      metadata: payload.metadata
+      metadata: payload.metadata,
+      role
     });
 
     await postMessage(agentToken, {
       task_id: taskId,
-      content: result.response,
+      content: runtimeResult.response,
       actor_type: "agent",
       agent_role: role
     });
@@ -3098,7 +3977,7 @@ export function buildApp() {
       await postDocument(agentToken, {
         task_id: taskId,
         title: payload.metadata.plan_title || "Plan",
-        content: result.response,
+        content: runtimeResult.response,
         doc_type: "plan"
       });
     }
@@ -3107,15 +3986,16 @@ export function buildApp() {
     const response: Record<string, unknown> = {
       status: "ok",
       task_id: taskId,
-      trace_id: request.traceId,
-      response: result.response,
-      usage: result.usage,
-      cost: result.cost
+      trace_id: runtimeResult.trace_id,
+      execution_id: runtimeResult.execution_id,
+      response: runtimeResult.response,
+      usage: runtimeResult.usage,
+      cost: runtimeResult.cost
     };
 
     // Add context warning if approaching limit
-    if (result.contextWarning) {
-      response.context_warning = result.contextWarning;
+    if (runtimeResult.context_warning) {
+      response.context_warning = runtimeResult.context_warning;
     }
 
     // Fire webhook if configured (async, doesn't block response)
@@ -3126,9 +4006,9 @@ export function buildApp() {
           taskId,
           userId: payload.user_id,
           role,
-          response: result.response,
-          usage: result.usage,
-          cost: result.cost,
+          response: runtimeResult.response,
+          usage: runtimeResult.usage,
+          cost: runtimeResult.cost,
           metadata: payload.metadata
         }),
         app.log
