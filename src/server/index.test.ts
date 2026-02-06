@@ -82,12 +82,12 @@ describe("/api/agents/send", () => {
   });
 
   it("uses CLASPER_DEFAULT_TASK when no task_id or task_title provided", async () => {
-    // Note: Config is loaded at module import time, so we test the behavior
-    // when CLASPER_DEFAULT_TASK is set (which it is in test env)
-    // The actual "no task specified" error path is tested implicitly through
-    // the integration when config.defaultTaskTitle is empty
-    
-    const app = buildApp();
+    // Config is loaded at module import time, so we must build an app with
+    // CLASPER_DEFAULT_TASK set in the env for this test.
+    const buildAppWithDefaultTask = await buildAppWithEnv({
+      CLASPER_DEFAULT_TASK: "Default Task"
+    });
+    const app = buildAppWithDefaultTask();
     const response = await app.inject({
       method: "POST",
       url: "/api/agents/send",
@@ -95,12 +95,10 @@ describe("/api/agents/send", () => {
         user_id: "user-1",
         session_key: "user:user-1:agent",
         message: "Hello"
-        // No task_id or task_title - should use CLASPER_DEFAULT_TASK from env
+        // No task_id or task_title - uses CLASPER_DEFAULT_TASK from env
       }
     });
 
-    // When CLASPER_DEFAULT_TASK is set, it should succeed
-    // (creates or finds task with that title)
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.task_id).toBeDefined();
@@ -224,7 +222,11 @@ describe("Smart context daemon key guardrails", () => {
 
 describe("Ops console auth guardrails", () => {
   it("requires Authorization header for /ops/api/me", async () => {
-    const app = buildApp();
+    // Build app with dev no-auth disabled so auth is required
+    const buildAppWithAuth = await buildAppWithEnv({
+      OPS_DEV_NO_AUTH: ""
+    });
+    const app = buildAppWithAuth();
     const response = await app.inject({
       method: "GET",
       url: "/ops/api/me"
@@ -234,7 +236,10 @@ describe("Ops console auth guardrails", () => {
   });
 
   it("requires Authorization header for /ops/api/traces", async () => {
-    const app = buildApp();
+    const buildAppWithAuth = await buildAppWithEnv({
+      OPS_DEV_NO_AUTH: ""
+    });
+    const app = buildAppWithAuth();
     const response = await app.inject({
       method: "GET",
       url: "/ops/api/traces"
