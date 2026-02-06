@@ -4,12 +4,12 @@
   <img src="clasper-banner.png" alt="Clasper" width="100%" />
 </p>
 
-<h2 align="center">Production Agent Runtime with Governance & Observability</h2>
+<h2 align="center">Governance Authority for AI Execution</h2>
 
 <p align="center">
-  <b>SHIP IT. DIG DEEP.</b>
+  <b>Governance first. Execution optional.</b>
   <br />
-  <i>Safe, explainable, and shippable AI agents for multi-tenant SaaS backends.</i>
+  <i>Decide what AI is allowed to do — and prove what actually happened. Safe, explainable, and shippable for multi-tenant SaaS.</i>
 </p>
 
 <p align="center">
@@ -21,24 +21,37 @@
 
 ---
 
-**Clasper** is an API-first, stateless agent execution platform designed for **production SaaS integration**. It enables workspace-driven agents with **traceable behavior, governance controls, role-based access, cost/risk guards, and operational visibility** — suitable for multi-tenant backends and audit-intensive environments.
+**Clasper** is a **governance-first control plane** for AI agent execution. It decides whether execution is allowed, under what constraints, and produces **evidence** you can stand behind — trust status on traces, verifiable exports, policy-as-data, and async human approvals. **Execution is optional**: you can run governance-only (your systems or external adapters execute) or add Clasper’s built-in stateless runtime for LLM execution. Either way, OS and browser actions stay in your backend.
 
-Inspired by [OpenClaw](https://openclaw.ai/)'s workspace pattern, Clasper adapts these ideas into a **multi-tenant, stateless, API-first orchestration and governance platform** for backend agents.
+Inspired by [OpenClaw](https://openclaw.ai/)'s workspace pattern, Clasper adapts these ideas into a **multi-tenant, API-first governance platform** with optional execution.
 
 > *"AI agents are not demos. They are production systems."*
 > Read the [Clasper Ops Manifesto](docs/MANIFESTO.md)
 
 ---
 
+## Two Ways to Deploy
+
+Clasper is the same product with the same guarantees; you choose how much execution lives inside Clasper:
+
+| Mode | Description |
+|------|--------------|
+| **Governance-only** | Use Clasper for policy, audit, traces, cost/risk, and the Ops Console. Execution stays in **your backend** or in **external execution adapters** that request permission from Clasper and ingest telemetry back. No LLM runtime inside Clasper unless you add it. |
+| **Governance + managed execution** | Add Clasper’s **built-in stateless runtime** so Clasper also runs LLM execution via `POST /api/agents/send`. Governance (RBAC, budgets, risk, approvals) still runs first; the runtime executes only within granted scope. All OS/browser/data actions remain in your backend. |
+
+Start governance-first, then add the runtime if you want one place to run both governance and LLM calls. See [Architecture](https://clasper.ai/docs/architecture/) and [Integration](https://clasper.ai/docs/integration/) in the docs.
+
+---
+
 ## What Clasper Is
 
-- **Stateless HTTP runtime** for agent executions
-- **Workspace-driven prompt config** (SOUL.md, AGENTS.md, HEARTBEAT.md, skills)
-- **Multi-tenant context isolation** with per-user scoping
+- **Governance core** — policy, RBAC, risk, cost/budgets, audit, decision explainability, async approvals
+- **Observability** — full traces, replay/diff, annotations, retention, verifiable export bundles
+- **Control Plane Contract** — Clasper ↔ your backend (tasks, messages, documents)
+- **Adapter Contract** — Clasper ↔ execution adapters (optional; decision + telemetry ingest)
+- **Optional stateless HTTP runtime** — built-in adapter for LLM execution (`/api/agents/send`, `/api/agents/stream`)
+- **Workspace-driven config** (SOUL.md, AGENTS.md, HEARTBEAT.md, skills)
 - **Skill registry** with versioning, lifecycle states, and testing
-- **Observable and explainable traces** with diff, replay, and annotations
-- **Operational guardrails** (RBAC, budgets, risk scoring, audit logs)
-- **Control Plane Contract** for portable backend integration
 - **Smart context selection** (optional relevance-based skills + memory)
 
 ## What Clasper Is Not
@@ -46,13 +59,13 @@ Inspired by [OpenClaw](https://openclaw.ai/)'s workspace pattern, Clasper adapts
 - A daemon for OS/browser automation (no shell access, no file system)
 - A personal agent chatbot (designed for backend integration, not direct chat)
 - A general automation framework like OpenClaw (stateless, no persistent sessions)
-- A replacement for your backend (your system remains the source of truth)
+- A replacement for your backend (your system remains the source of truth; execution can stay entirely in your systems)
 
 ---
 
 ## How Clasper Works With Your Backend
 
-Clasper has a **bidirectional relationship** with your SaaS backend:
+When you use **Governance + managed execution**, Clasper has a **bidirectional relationship** with your SaaS backend:
 
 ```
 ┌─────────────┐                              ┌─────────────┐
@@ -75,6 +88,8 @@ Clasper has a **bidirectional relationship** with your SaaS backend:
 4. **Your backend remains the source of truth** — Clasper is stateless
 
 This means you can run multiple Clasper instances behind a load balancer with no sticky sessions.
+
+In **governance-only** mode, your backend (or external adapters) call Clasper only for execution decisions and telemetry ingest; see the [Adapter Contract](https://clasper.ai/docs/adapter-contract/) and [Integration](https://clasper.ai/docs/integration/) docs.
 
 See [INTEGRATION.md](docs/INTEGRATION.md) for the full integration guide.
 
@@ -120,11 +135,13 @@ See [INTEGRATION.md](docs/INTEGRATION.md) for the full integration guide.
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Clasper integrates with your backend via the **Control Plane Contract** — a standardized HTTP API for tasks, messages, and documents. Your backend remains the source of truth; Clasper handles reasoning, execution, and governance.
+Clasper integrates with your backend via the **Control Plane Contract** — a standardized HTTP API for tasks, messages, and documents. Your backend remains the source of truth. In governance-only mode, Clasper only decides and records; in governance + runtime mode, Clasper also runs the LLM execution step.
 
 ---
 
-## Execution Modes
+## Execution Modes (when using the built-in runtime)
+
+When the built-in runtime adapter is enabled, you get:
 
 | Mode | Endpoint | Description |
 |------|----------|-------------|
@@ -133,6 +150,8 @@ Clasper integrates with your backend via the **Control Plane Contract** — a st
 | **LLM Task** | `POST /llm-task` | Structured JSON-only output |
 | **Trace Replay** | `GET /traces/:id/replay` | Reproduce past executions |
 | **Ops Console** | `/ops/*` | OIDC-protected operational UI |
+
+Governance (traces, audit, Ops Console, decision APIs) is always available regardless of whether the built-in runtime is enabled.
 
 ---
 
