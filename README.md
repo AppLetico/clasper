@@ -26,7 +26,7 @@
 Inspired by [OpenClaw](https://openclaw.ai/)'s workspace pattern, Clasper adapts these ideas into a **multi-tenant, API-first governance platform** with optional execution.
 
 > *"AI agents are not demos. They are production systems."*
-> Read the [Clasper Ops Manifesto](docs/MANIFESTO.md)
+> Read the [Clasper Manifesto](https://clasper.ai/docs/manifesto/)
 
 ---
 
@@ -91,7 +91,7 @@ This means you can run multiple Clasper instances behind a load balancer with no
 
 In **governance-only** mode, your backend (or external adapters) call Clasper only for execution decisions and telemetry ingest; see the [Adapter Contract](https://clasper.ai/docs/adapter-contract/) and [Integration](https://clasper.ai/docs/integration/) docs.
 
-See [INTEGRATION.md](docs/INTEGRATION.md) for the full integration guide.
+See the [Integration guide](https://clasper.ai/docs/integration/) for full backend and adapter integration patterns.
 
 ---
 
@@ -190,8 +190,8 @@ These are first-class capabilities, not afterthoughts:
 - Safe promotions with pre-flight checks
 
 ### Audit & Compliance
-- Immutable audit logs for all actions
-- Hash-chained audit exports for tamper evidence
+- Tamper-evident audit logs for all actions
+- Hash-chained audit exports for offline verification
 - PII redaction with configurable patterns
 - Retention enforcement with cleanup
 - Audit API with pagination (`GET /ops/api/audit`)
@@ -259,6 +259,12 @@ CLASPER_TELEMETRY_MAX_SKEW_SECONDS=300
 CLASPER_TOOL_TOKEN_SECRET=your-secret
 CLASPER_TOOL_AUTH_MODE=warn             # off | warn | enforce
 CLASPER_POLICY_PATH=./config/policies.yaml
+
+# Adapter auth (optional; required for external execution adapters)
+ADAPTER_JWT_SECRET=your-secret
+
+# Async approvals (optional; required for pending decisions + decision tokens)
+CLASPER_DECISION_TOKEN_SECRET=your-secret
 
 # Database (optional, defaults to ./clasper.db)
 CLASPER_DB_PATH=./clasper.db
@@ -361,7 +367,7 @@ When integrating Clasper with a new backend:
 - [ ] Implement the **Control Plane Contract v1** endpoints
 - [ ] Ensure `X-Agent-Token` JWTs validate and enforce `user_id` scoping
 - [ ] Support `idempotency_key` on create endpoints
-- [ ] Run conformance: `npm run conformance`
+- [ ] Run conformance: `CONTROL_PLANE_URL=<backend> AGENT_TOKEN=<jwt> npm run conformance`
 - [ ] Optional: add notifications, SSE events, heartbeat/standup
 
 ### Required Endpoints
@@ -384,8 +390,8 @@ When integrating Clasper with a new backend:
 | Tool approvals | `POST/GET/PATCH /tool-requests` |
 
 See:
-- [docs/CONTROL_PLANE_CONTRACT.md](docs/CONTROL_PLANE_CONTRACT.md)
-- [docs/CONTROL_PLANE_QUICKSTART.md](docs/CONTROL_PLANE_QUICKSTART.md)
+- [Control Plane Contract](https://clasper.ai/docs/control-plane-contract/)
+- [Getting Started](https://clasper.ai/docs/getting-started/)
 - [examples/mission-control-lite/](examples/mission-control-lite/)
 
 ---
@@ -446,6 +452,8 @@ See:
 | `POST /api/policy/evaluate` | Policy evaluation |
 | `POST /api/policy/dry-run` | Policy evaluation (ops) |
 
+For **governance-only** and **adapter** flows (execution request, pending decisions, ingest), see the [Adapter Contract](https://clasper.ai/docs/adapter-contract/) and [Governance](https://clasper.ai/docs/governance/) docs. Key endpoints: `POST /api/execution/request`, `GET /api/decisions/:id`, `POST /api/decisions/:id/consume`, `POST /api/ingest/*`.
+
 ### Retention
 
 | Endpoint | Purpose |
@@ -476,7 +484,7 @@ See:
 | `GET /evals/:id` | Get evaluation result |
 | `GET /evals` | List evaluation results |
 
-Full details in [docs/API.md](docs/API.md).
+Full details in the [API Reference](https://clasper.ai/docs/api-reference/).
 
 ---
 
@@ -500,16 +508,22 @@ Clasper supports multiple LLM providers via [pi-ai](https://github.com/badlogic/
 
 ```
 src/lib/
+├── adapters/       # Execution contract, ingest, registry, signed telemetry
+├── auth/           # Agent auth, ops auth, permissions, tenant context
+├── context/        # Context selection, embeddings, vector store
 ├── core/           # Database, config
-├── auth/           # Authentication, tenant context
-├── tracing/        # Trace model, store, diff, annotations, retention
+├── evals/          # Evaluation framework
+├── exports/        # Verifiable export bundles, verify CLI
+├── governance/     # Audit logs, decisions, redaction, budgets, risk, tool tokens
+├── integrations/   # Control Plane client, webhooks, costs
+├── ops/            # Ops schema, dashboards, trace views, skill ops
+├── policy/         # Policy engine, schema, store (data-driven policies)
+├── providers/      # LLM providers, contracts
+├── security/       # SHA-256, stable JSON
 ├── skills/         # Skill manifest, registry, testing, lifecycle
 ├── tools/          # Tool proxy, permissions
-├── governance/     # Audit logs, redaction, budgets, risk scoring
-├── providers/      # LLM providers, contracts
-├── workspace/      # Workspace mgmt, versioning, pins, environments, impact
-├── evals/          # Evaluation framework
-└── integrations/   # Control Plane client, webhooks, costs
+├── tracing/        # Trace model, store, diff, annotations, retention, trust status
+└── workspace/      # Workspace mgmt, versioning, pins, environments, impact
 ```
 
 ---
@@ -535,14 +549,18 @@ Full documentation is available at **[clasper.ai/docs](https://clasper.ai/docs/)
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](https://clasper.ai/docs/getting-started/) | Complete getting started guide |
-| [Integration Guide](https://clasper.ai/docs/integration/) | Backend ↔ Clasper integration patterns |
-| [Workspace Config](https://clasper.ai/docs/workspace/) | Workspace specification (SOUL, AGENTS, skills) |
-| [Architecture](https://clasper.ai/docs/architecture/) | System architecture and design |
-| [Operations](https://clasper.ai/docs/operations/) | Tracing, evals, versioning, ops console |
-| [Governance](https://clasper.ai/docs/governance/) | Audit, redaction, budgets, RBAC |
-| [API Reference](https://clasper.ai/docs/api-reference/) | Full API reference |
-| [Manifesto](https://clasper.ai/docs/manifesto/) | Our philosophy and principles |
+| [Getting Started](https://clasper.ai/docs/getting-started/) | Quickstart: governance + optional built-in runtime |
+| [Architecture](https://clasper.ai/docs/architecture/) | Governance core, adapters, deployment profiles |
+| [Integration](https://clasper.ai/docs/integration/) | Backend (Control Plane) and adapter integration |
+| [Control Plane Contract](https://clasper.ai/docs/control-plane-contract/) | Backend API contract (tasks, messages, documents) |
+| [Adapter Contract](https://clasper.ai/docs/adapter-contract/) | Execution adapters: decision request + telemetry ingest |
+| [Workspace](https://clasper.ai/docs/workspace/) | SOUL, AGENTS, skills, workspace config |
+| [Governance](https://clasper.ai/docs/governance/) | Default-deny, policy, async approvals, audit |
+| [Operations](https://clasper.ai/docs/operations/) | Tracing, Ops Console, adapter visibility |
+| [Trust & Enforcement](https://clasper.ai/docs/trust-enforcement/) | Signed telemetry, tool tokens, integrity |
+| [Configuration](https://clasper.ai/docs/configuration/) | Environment variables and toggles |
+| [API Reference](https://clasper.ai/docs/api-reference/) | Full endpoint reference |
+| [Manifesto](https://clasper.ai/docs/manifesto/) | Philosophy and principles |
 
 ---
 
