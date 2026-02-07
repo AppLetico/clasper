@@ -137,6 +137,8 @@ See the [Integration guide](https://clasper.ai/docs/integration/) for full backe
 
 Clasper integrates with your backend via the **Control Plane Contract** — a standardized HTTP API for tasks, messages, and documents. Your backend remains the source of truth. In governance-only mode, Clasper only decides and records; in governance + runtime mode, Clasper also runs the LLM execution step.
 
+**Control Plane vs Ops Console:** The **Control Plane** is *your backend’s* API (the contract Clasper calls for tasks, messages, documents). The **Ops Console** is *Clasper’s* operator UI at `/ops` (traces, audit, policies, dashboards)—separate from your backend.
+
 ---
 
 ## Execution Modes (when using the built-in runtime)
@@ -181,6 +183,7 @@ These are first-class capabilities, not afterthoughts:
 - Per-tenant budget controls (hard/soft limits)
 - Pre-execution cost forecasting
 - Risk scoring based on tool breadth, skill maturity, temperature, data sensitivity
+- Optional execution context signals for high-risk capabilities (`intent`, `context`, `provenance`) to improve policy decisions and approvals
 - Dashboards with coverage metadata
 
 ### Environment & Promotion
@@ -290,7 +293,7 @@ npm run build && npm start
 
 #### 5) Configure Ops Console (Optional)
 
-The Operations Console is served at `/ops` and is protected by OIDC + RBAC.
+The Operations Console is served at `/ops` and is protected by OIDC + RBAC. For local dev without OIDC, you can set `OPS_DEV_NO_AUTH=true` (and ensure `NODE_ENV` is not `production`); never set in production.
 
 Required env vars:
 

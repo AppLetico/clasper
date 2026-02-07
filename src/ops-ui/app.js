@@ -921,6 +921,36 @@ function renderDecisions(decisions) {
     .map((decision) => {
       const snapshot = decision.request_snapshot || {};
       const decisionInfo = snapshot.decision || {};
+      const req = snapshot.request || {};
+      const intentLine = req.intent ? `<div>Intent: ${req.intent}</div>` : "";
+      const ctxLines = req.context
+        ? [
+            req.context.external_network != null
+              ? `External network: ${req.context.external_network ? "yes" : "no"}`
+              : "",
+            req.context.writes_files != null
+              ? `Writes files: ${req.context.writes_files ? "yes" : "no"}`
+              : "",
+            req.context.elevated_privileges != null
+              ? `Elevated privileges: ${req.context.elevated_privileges ? "yes" : "no"}`
+              : "",
+            req.context.package_manager
+              ? `Package manager: ${req.context.package_manager}`
+              : "",
+          ]
+            .filter(Boolean)
+            .map((line) => `<div>${line}</div>`)
+            .join("")
+        : "";
+      const provLines = req.provenance
+        ? [
+            req.provenance.source ? `Source: ${req.provenance.source}` : "",
+            req.provenance.publisher ? `Publisher: ${req.provenance.publisher}` : "",
+          ]
+            .filter(Boolean)
+            .map((line) => `<div>${line}</div>`)
+            .join("")
+        : "";
       const matched = (decisionInfo.matched_policies || []).join(", ") || "-";
       const explanation = decisionInfo.explanation || "-";
       const traceLines = (decisionInfo.decision_trace || [])
@@ -938,6 +968,7 @@ function renderDecisions(decisions) {
           <div>Matched policies: ${matched}</div>
           <div>Decision trace: ${traceLines || "-"}</div>
           <div>Explanation: ${explanation}</div>
+          ${intentLine}${ctxLines}${provLines}
           <div class="decision-actions">
             <button data-action="approve">Approve</button>
             <button data-action="deny">Deny</button>

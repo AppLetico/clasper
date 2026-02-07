@@ -11,6 +11,18 @@ export interface PolicyContext {
   skill_state?: string;
   risk_level?: string;
   estimated_cost?: number;
+  requested_capabilities?: string[];
+  intent?: string;
+  context?: {
+    external_network?: boolean;
+    writes_files?: boolean;
+    elevated_privileges?: boolean;
+    package_manager?: string;
+  };
+  provenance?: {
+    source?: string;
+    publisher?: string;
+  };
 }
 
 export interface PolicyDecisionTrace {
@@ -71,6 +83,26 @@ function conditionsMatch(policy: PolicyObject, ctx: PolicyContext): boolean {
     return false;
   if (conditions.max_cost !== undefined && (ctx.estimated_cost ?? 0) > conditions.max_cost)
     return false;
+  if (conditions.capability && !ctx.requested_capabilities?.includes(conditions.capability))
+    return false;
+  if (conditions.intent && conditions.intent !== ctx.intent) return false;
+  if (conditions.context) {
+    const cc = conditions.context;
+    const rc = ctx.context;
+    if (cc.external_network !== undefined && rc?.external_network !== cc.external_network)
+      return false;
+    if (cc.writes_files !== undefined && rc?.writes_files !== cc.writes_files) return false;
+    if (cc.elevated_privileges !== undefined && rc?.elevated_privileges !== cc.elevated_privileges)
+      return false;
+    if (cc.package_manager !== undefined && rc?.package_manager !== cc.package_manager)
+      return false;
+  }
+  if (conditions.provenance) {
+    const cp = conditions.provenance;
+    const rp = ctx.provenance;
+    if (cp.source !== undefined && rp?.source !== cp.source) return false;
+    if (cp.publisher !== undefined && rp?.publisher !== cp.publisher) return false;
+  }
   return true;
 }
 

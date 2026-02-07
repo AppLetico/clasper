@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Clasper Adapter Contract
-  version: v1
+  version: v2
   description: HTTP contract for execution adapters and telemetry ingest.
 servers:
   - url: http://localhost:8081
@@ -158,6 +158,34 @@ components:
             type: string
         estimated_cost:
           type: number
+        intent:
+          type: string
+          description: Human-readable declaration of why execution is requested
+        context:
+          type: object
+          properties:
+            external_network:
+              type: boolean
+            writes_files:
+              type: boolean
+            elevated_privileges:
+              type: boolean
+            package_manager:
+              type: string
+            targets:
+              type: array
+              items:
+                type: string
+        provenance:
+          type: object
+          properties:
+            source:
+              type: string
+              enum: [marketplace, internal, git, unknown]
+            publisher:
+              type: string
+            artifact_hash:
+              type: string
     ExecutionScope:
       type: object
       required: [capabilities, max_steps, max_cost, expires_at]

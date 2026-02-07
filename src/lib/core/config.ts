@@ -41,6 +41,7 @@ export const config = {
   opsTenantClaim: process.env.OPS_TENANT_CLAIM || "tenant_id",
   opsWorkspaceClaim: process.env.OPS_WORKSPACE_CLAIM || "workspace_id",
   opsAllowedTenantsClaim: process.env.OPS_ALLOWED_TENANTS_CLAIM || "allowed_tenants",
+  opsDevNoAuth: process.env.OPS_DEV_NO_AUTH === "true",
 
   // ===== Multi-Provider LLM Configuration =====
   // Default LLM provider (openai, anthropic, google, xai, groq, mistral, openrouter)

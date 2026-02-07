@@ -201,6 +201,24 @@ describe('calculateRiskScore', () => {
 
       expect(result.riskFactors.some(f => f.includes('temperature'))).toBe(true);
     });
+
+    it('should identify context and provenance risk factors', () => {
+      const result = calculateRiskScore({
+        toolCount: 1,
+        adapterRiskClass: 'low',
+        context: {
+          external_network: true,
+          elevated_privileges: true,
+        },
+        provenance: {
+          source: 'marketplace',
+        },
+      });
+
+      expect(result.riskFactors.some(f => f.includes('External network'))).toBe(true);
+      expect(result.riskFactors.some(f => f.includes('Elevated privileges'))).toBe(true);
+      expect(result.riskFactors.some(f => f.includes('Marketplace provenance'))).toBe(true);
+    });
   });
 
   describe('recommendations', () => {
@@ -229,6 +247,43 @@ describe('calculateRiskScore', () => {
       });
 
       expect(result.recommendations.some(r => r.includes('temperature'))).toBe(true);
+    });
+  });
+
+  describe('context and provenance risk', () => {
+    it('should increase adapter risk for external network and elevated privileges', () => {
+      const baseline = calculateRiskScore({
+        toolCount: 1,
+        adapterRiskClass: 'low',
+      });
+
+      const withContext = calculateRiskScore({
+        toolCount: 1,
+        adapterRiskClass: 'low',
+        context: {
+          external_network: true,
+          elevated_privileges: true,
+        },
+      });
+
+      expect(withContext.factors.adapterRisk).toBeGreaterThan(baseline.factors.adapterRisk);
+    });
+
+    it('should increase adapter risk for marketplace provenance', () => {
+      const baseline = calculateRiskScore({
+        toolCount: 1,
+        adapterRiskClass: 'low',
+      });
+
+      const withProvenance = calculateRiskScore({
+        toolCount: 1,
+        adapterRiskClass: 'low',
+        provenance: {
+          source: 'marketplace',
+        },
+      });
+
+      expect(withProvenance.factors.adapterRisk).toBeGreaterThan(baseline.factors.adapterRisk);
     });
   });
 });

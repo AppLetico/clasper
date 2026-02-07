@@ -31,6 +31,19 @@ export interface ExecutionDecisionRequest {
   custom_flags?: string[];
   rbac_allowed?: boolean;
   callback_url?: string;
+  intent?: string;
+  context?: {
+    external_network?: boolean;
+    writes_files?: boolean;
+    elevated_privileges?: boolean;
+    package_manager?: string;
+    targets?: string[];
+  };
+  provenance?: {
+    source?: 'marketplace' | 'internal' | 'git' | 'unknown';
+    publisher?: string;
+    artifact_hash?: string;
+  };
   override?: {
     request: OverrideRequest;
     actor: string;
@@ -68,6 +81,8 @@ export function evaluateExecutionDecision(
     customFlags: request.custom_flags,
     adapterRiskClass: request.adapter_risk_class,
     requestedCapabilities: request.requested_capabilities,
+    context: request.context,
+    provenance: request.provenance,
   });
 
   const budgetManager = getBudgetManager();
@@ -85,6 +100,10 @@ export function evaluateExecutionDecision(
     skill_state: request.skill_state,
     risk_level: riskScore.level,
     estimated_cost: request.estimated_cost,
+    requested_capabilities: request.requested_capabilities,
+    intent: request.intent,
+    context: request.context,
+    provenance: request.provenance,
   });
 
   if (!budgetCheck.allowed && !request.override) {

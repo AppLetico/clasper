@@ -55,6 +55,17 @@ export interface RiskScoringInput {
 
   /** Requested adapter capabilities */
   requestedCapabilities?: string[];
+
+  /** Execution context signals */
+  context?: {
+    external_network?: boolean;
+    elevated_privileges?: boolean;
+  };
+
+  /** Execution provenance */
+  provenance?: {
+    source?: string;
+  };
 }
 
 /**
@@ -273,8 +284,27 @@ function calculateAdapterRisk(input: RiskScoringInput): number {
   const capabilityRisk = input.requestedCapabilities
     ? Math.min(30, input.requestedCapabilities.length * 5)
     : 0;
+  const contextRisk = calculateContextRisk(input);
 
-  return Math.min(100, baseRisk + capabilityRisk);
+  return Math.min(100, baseRisk + capabilityRisk + contextRisk);
+}
+
+function calculateContextRisk(input: RiskScoringInput): number {
+  let risk = 0;
+
+  if (input.context?.external_network === true) {
+    risk += 30;
+  }
+
+  if (input.context?.elevated_privileges === true) {
+    risk += 40;
+  }
+
+  if (input.provenance?.source === 'marketplace') {
+    risk += 20;
+  }
+
+  return Math.min(100, risk);
 }
 
 /**
@@ -331,6 +361,18 @@ function identifyRiskFactors(
 
   if (input.adapterRiskClass) {
     risks.push(`Adapter risk class: ${input.adapterRiskClass}`);
+  }
+
+  if (input.context?.external_network === true) {
+    risks.push('External network access declared');
+  }
+
+  if (input.context?.elevated_privileges === true) {
+    risks.push('Elevated privileges declared');
+  }
+
+  if (input.provenance?.source === 'marketplace') {
+    risks.push('Marketplace provenance');
   }
   
   return risks;

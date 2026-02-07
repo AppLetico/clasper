@@ -23,6 +23,22 @@ export const PolicyConditionsSchema = z.object({
   max_cost: z.number().optional(),
   tenant_id: z.string().optional(),
   workspace_id: z.string().optional(),
+  capability: z.string().optional(),
+  intent: z.string().optional(),
+  context: z
+    .object({
+      external_network: z.boolean().optional(),
+      writes_files: z.boolean().optional(),
+      elevated_privileges: z.boolean().optional(),
+      package_manager: z.string().optional(),
+    })
+    .optional(),
+  provenance: z
+    .object({
+      source: z.enum(['marketplace', 'internal', 'git', 'unknown']).optional(),
+      publisher: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const PolicyEffectSchema = z.object({

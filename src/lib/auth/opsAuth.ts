@@ -179,14 +179,47 @@ export function getContextPermissions(context: OpsContext): Permission[] {
 // Re-export permission types and helpers for convenience
 export { type Permission, hasPermission, PermissionError } from "./permissions.js";
 
+const DEV_BYPASS_CONTEXT: OpsContext = {
+  userId: "dev-user",
+  tenantId: "dev-tenant",
+  workspaceId: "dev-tenant",
+  roles: ["admin"],
+  role: "admin",
+  allowedTenants: [],
+  raw: {}
+};
+
+let devBypassWarned = false;
+function warnDevBypassOnce(): void {
+  if (!devBypassWarned) {
+    devBypassWarned = true;
+    console.warn("Ops dev no-auth is enabled; do not use in production.");
+  }
+}
+
 export async function requireOpsContextFromHeaders(
   headers: Record<string, string | string[] | undefined>
 ): Promise<OpsContext> {
   const header = headers["authorization"];
+  const hasHeader = !!header && typeof header === "string";
+  const match = hasHeader ? (header as string).match(/^Bearer\s+(.*)$/i) : null;
+  const tokenValue = match ? match[1] : undefined;
+
+  const devBypassAllowed =
+    process.env.OPS_DEV_NO_AUTH === "true" &&
+    !process.env.OPS_OIDC_ISSUER &&
+    process.env.NODE_ENV !== "production";
+  const requestQualifiesForDevBypass =
+    !hasHeader || (match && (tokenValue === "" || tokenValue === "dev"));
+
+  if (devBypassAllowed && requestQualifiesForDevBypass) {
+    warnDevBypassOnce();
+    return DEV_BYPASS_CONTEXT;
+  }
+
   if (!header || typeof header !== "string") {
     throw new OpsAuthError("Missing Authorization header", "missing_token");
   }
-  const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match) {
     throw new OpsAuthError("Invalid Authorization header", "missing_token");
   }

@@ -1457,6 +1457,23 @@ export function buildApp() {
     custom_flags: z.array(z.string()).optional(),
     rbac_allowed: z.boolean().optional(),
     callback_url: z.string().url().optional(),
+    intent: z.string().optional(),
+    context: z
+      .object({
+        external_network: z.boolean().optional(),
+        writes_files: z.boolean().optional(),
+        elevated_privileges: z.boolean().optional(),
+        package_manager: z.string().optional(),
+        targets: z.array(z.string()).optional(),
+      })
+      .optional(),
+    provenance: z
+      .object({
+        source: z.enum(['marketplace', 'internal', 'git', 'unknown']).optional(),
+        publisher: z.string().optional(),
+        artifact_hash: z.string().optional(),
+      })
+      .optional(),
     override: z
       .object({
         actor: z.string(),
