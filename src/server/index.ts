@@ -120,9 +120,42 @@ const WebhookSchema = z.object({
   headers: z.record(z.string()).optional()
 });
 
+const STARTUP_BANNER = `
+   ____ _
+  / ___| | __ _ ___ _ __   ___ _ __
+ | |   | |/ _\` / __| '_ \\ / _ \\ '__|
+ | |___| | (_| \\__ \\ |_) |  __/ |
+  \\____|_|\\__,_|___/ .__/ \\___|_|
+                   |_|
+  🛡️  Clasper Ops — Governance & Audit
+  ────────────────────────────────────
+`;
+
 export function buildApp() {
-  const app = Fastify({ logger: true });
+  const isDev = process.stdout.isTTY;
+  const app = Fastify({
+    logger: isDev
+      ? {
+          transport: {
+            target: "pino-pretty",
+            options: {
+              colorize: true,
+              translateTime: "HH:MM:ss",
+              ignore: "pid,hostname",
+            },
+          },
+        }
+      : true,
+  });
   const opsUiRoot = join(process.cwd(), "src", "ops-ui");
+
+  // Startup banner (stdout so it's readable in dev)
+  const base = `http://localhost:${config.port}`;
+  if (process.stdout.isTTY) {
+    console.log("\x1b[36m" + STARTUP_BANNER + "\x1b[0m");
+    console.log("  \x1b[1m▶\x1b[0m  API & Ops Console: \x1b[4m%s\x1b[0m", base);
+    console.log("  \x1b[1m▶\x1b[0m  Health: \x1b[4m%s/health\x1b[0m\n", base);
+  }
 
   // Initialize database
   try {
@@ -232,6 +265,24 @@ export function buildApp() {
       return reply.type("text/css").send(css);
     } catch (error) {
       return reply.status(500).send({ error: "Ops UI styles not available" });
+    }
+  });
+
+  app.get("/ops/favicon.svg", async (_request, reply) => {
+    try {
+      const svg = readFileSync(join(opsUiRoot, "favicon.svg"), "utf-8");
+      return reply.type("image/svg+xml").send(svg);
+    } catch (error) {
+      return reply.status(500).send({ error: "Ops UI favicon not available" });
+    }
+  });
+
+  app.get("/ops/favicon.ico", async (_request, reply) => {
+    try {
+      const ico = readFileSync(join(opsUiRoot, "favicon.ico"));
+      return reply.type("image/x-icon").send(ico);
+    } catch (error) {
+      return reply.status(500).send({ error: "Ops UI favicon.ico not available" });
     }
   });
 

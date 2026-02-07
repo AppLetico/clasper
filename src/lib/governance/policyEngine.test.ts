@@ -1,28 +1,17 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { existsSync, rmSync, mkdirSync } from 'fs';
-import { join } from 'path';
 import { initDatabase, resetDatabase } from '../core/db.js';
 import { evaluatePolicy } from './policyEngine.js';
 import { upsertPolicy } from '../policy/policyStore.js';
 
-// Use a dedicated subdir so we don't remove .test-db/tool-tokens when running in parallel
-const TEST_DB_DIR = join(process.cwd(), '.test-db', 'policy-engine');
-const TEST_DB_PATH = join(TEST_DB_DIR, 'policy-engine.db');
-process.env.CLASPER_DB_PATH = TEST_DB_PATH;
-
 beforeEach(() => {
-  if (!existsSync(TEST_DB_DIR)) {
-    mkdirSync(TEST_DB_DIR, { recursive: true });
-  }
+  process.env.CLASPER_DB_PATH = ':memory:';
   resetDatabase();
   initDatabase();
 });
 
 afterEach(() => {
   resetDatabase();
-  if (existsSync(TEST_DB_DIR)) {
-    rmSync(TEST_DB_DIR, { recursive: true, force: true });
-  }
+  delete process.env.CLASPER_DB_PATH;
 });
 
 describe('Policy engine', () => {
